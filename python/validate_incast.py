@@ -73,8 +73,7 @@ def run_point(senders: int, ecn: bool, sweep_dir: Path) -> float:
         yaml.safe_dump(cfg, f)
         cfg_path = Path(f.name)
 
-    before = set(sweep_dir.glob("*/"))
-    subprocess.run(
+    proc = subprocess.run(
         [
             sys.executable,
             str(RUN_PY),
@@ -87,7 +86,9 @@ def run_point(senders: int, ecn: bool, sweep_dir: Path) -> float:
         capture_output=True,
         text=True,
     )
-    run_dir = (set(sweep_dir.glob("*/")) - before).pop()
+    run_dir = Path(next(line.split("run dir: ", 1)[1]
+                        for line in proc.stdout.splitlines()
+                        if line.startswith("run dir: ")))
 
     flows = pq.read_table(run_dir / "flows.parquet")
     end_ps = flows.column("end_ps").to_numpy()

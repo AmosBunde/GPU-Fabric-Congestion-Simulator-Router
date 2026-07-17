@@ -23,7 +23,9 @@ std::unique_ptr<IRouter> make_router(const Config& cfg, RngRegistry& rng) {
   }
   if (name == "flowlet") {
     return std::make_unique<FlowletRouter>(
-        cfg.get_i64_or("router.flowlet_gap_us", 0) * kPsPerUs);
+        cfg.get_i64_or("router.flowlet_gap_us", 0) * kPsPerUs,
+        rng.stream("router.flowlet")(),
+        cfg.get_i64_or("router.hysteresis_kb", 512) * 1024);
   }
   throw std::runtime_error("unknown router: " + name);
 }
