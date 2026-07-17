@@ -129,6 +129,8 @@ def main() -> int:
         return proc.returncode
 
     csv_to_parquet(out_dir / "flows.csv", out_dir / "flows.parquet")
+    if (out_dir / "links.csv").exists():
+        csv_to_parquet(out_dir / "links.csv", out_dir / "links.parquet")
 
     if not args.no_plot:
         sys.path.insert(0, str(Path(__file__).resolve().parent))

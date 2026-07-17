@@ -3,8 +3,10 @@
 #include <string>
 #include <vector>
 
+#include "gpufab/engine.hpp"
 #include "gpufab/flow.hpp"
 #include "gpufab/rng.hpp"
+#include "gpufab/topology.hpp"
 
 namespace gpufab {
 
@@ -12,6 +14,10 @@ namespace gpufab {
 // (locked Decision 2). The engine emits CSV; run.py converts it to Parquet,
 // which is the canonical artifact the Python side reads.
 void write_flows_csv(const std::string& path, const std::vector<Flow>& flows);
+
+void write_links_csv(const std::string& path,
+                     const std::vector<LinkSample>& samples,
+                     const Topology& topo);
 
 void write_seeds_txt(const std::string& path, const RngRegistry& rng);
 

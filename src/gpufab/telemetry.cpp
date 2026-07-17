@@ -34,6 +34,22 @@ void write_flows_csv(const std::string& path, const std::vector<Flow>& flows) {
   }
 }
 
+void write_links_csv(const std::string& path,
+                     const std::vector<LinkSample>& samples,
+                     const Topology& topo) {
+  auto out = open_or_throw(path);
+  out << "time_ps,link_id,src,dst,queue_bytes,utilization,drops_cum,"
+         "ecn_marks_cum\n";
+  char util[32];
+  for (const LinkSample& s : samples) {
+    const Link& l = topo.link(s.link);
+    std::snprintf(util, sizeof(util), "%.6f", s.utilization);
+    out << s.time_ps << ',' << s.link << ',' << l.src << ',' << l.dst << ','
+        << s.queue_bytes << ',' << util << ',' << s.drops_cum << ','
+        << s.ecn_marks_cum << '\n';
+  }
+}
+
 void write_seeds_txt(const std::string& path, const RngRegistry& rng) {
   auto out = open_or_throw(path);
   out << "master " << rng.master() << '\n';
