@@ -9,6 +9,7 @@
 #include "gpufab/router/ecmp.hpp"
 #include "gpufab/telemetry.hpp"
 #include "gpufab/topology.hpp"
+#include "gpufab/workloads.hpp"
 
 namespace {
 
@@ -22,17 +23,32 @@ std::unique_ptr<IRouter> make_router(const Config& cfg, RngRegistry& rng) {
   throw std::runtime_error("unknown router: " + name);
 }
 
-void add_workload(const Config& cfg, Engine& engine) {
+std::unique_ptr<IWorkload> make_workload(const Config& cfg,
+                                         const Topology& topo,
+                                         RngRegistry& rng) {
   const std::string kind = cfg.get_str("workload.kind");
   if (kind == "single_flow") {
-    Flow f;
-    f.id = 0;
-    f.src = static_cast<NodeId>(cfg.get_i64("workload.src"));
-    f.dst = static_cast<NodeId>(cfg.get_i64("workload.dst"));
-    f.bytes = cfg.get_i64("workload.bytes");
-    f.start_ps = 0;
-    engine.add_flow(f);
-    return;
+    return std::make_unique<SingleFlowWorkload>(
+        static_cast<NodeId>(cfg.get_i64("workload.src")),
+        static_cast<NodeId>(cfg.get_i64("workload.dst")),
+        cfg.get_i64("workload.bytes"));
+  }
+  if (kind == "incast") {
+    return std::make_unique<IncastWorkload>(
+        topo, static_cast<std::int32_t>(cfg.get_i64("workload.senders")),
+        static_cast<NodeId>(cfg.get_i64_or("workload.receiver", 0)),
+        cfg.get_i64("workload.bytes"));
+  }
+  if (kind == "allreduce_ring") {
+    return std::make_unique<RingAllReduceWorkload>(
+        static_cast<std::int32_t>(
+            cfg.get_i64_or("workload.hosts", topo.num_hosts())),
+        cfg.get_i64("workload.data_bytes"));
+  }
+  if (kind == "permutation") {
+    return std::make_unique<PermutationWorkload>(
+        topo, cfg.get_i64("workload.bytes"),
+        rng.stream("workload.permutation"));
   }
   throw std::runtime_error("unknown workload: " + kind);
 }
@@ -68,7 +84,9 @@ int run(const std::string& config_path, const std::string& out_dir) {
 
   auto router = make_router(cfg, rng);
   Engine engine(topo, *router, cfg.get_i64("workload.chunk_bytes"), transport);
-  add_workload(cfg, engine);
+  auto workload = make_workload(cfg, topo, rng);
+  engine.set_workload(workload.get());
+  workload->start(engine);
 
   const EngineStats stats = engine.run();
 

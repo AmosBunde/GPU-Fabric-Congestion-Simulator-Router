@@ -56,6 +56,23 @@ struct EngineStats {
   std::int64_t ecn_marks = 0;  // summed over links at end of run
 };
 
+class Engine;
+
+// A workload injects flows: the initial set in start(), and — for multi-step
+// collectives like ring all-reduce — follow-on flows from on_flow_complete.
+// The engine invokes on_flow_complete between events (never mid-handler), so
+// implementations may call Engine::add_flow freely.
+class IWorkload {
+ public:
+  virtual ~IWorkload() = default;
+  virtual std::string name() const = 0;
+  virtual void start(Engine& engine) = 0;
+  virtual void on_flow_complete(Engine& engine, const Flow& flow) {
+    (void)engine;
+    (void)flow;
+  }
+};
+
 // Single-threaded deterministic discrete-event engine. Virtual clock only —
 // no wall-clock, no sockets, no threads anywhere in the model path.
 class Engine {
@@ -64,6 +81,7 @@ class Engine {
          TransportParams transport);
 
   void add_flow(Flow flow);
+  void set_workload(IWorkload* workload) { workload_ = workload; }
   EngineStats run();
 
   const std::vector<Flow>& flows() const { return flows_; }
@@ -105,6 +123,8 @@ class Engine {
   IRouter& router_;
   std::int64_t chunk_bytes_;
   TransportParams transport_;
+  IWorkload* workload_ = nullptr;
+  std::vector<std::int32_t> completed_pending_;
   std::vector<Flow> flows_;
   std::vector<FlowState> state_;
   std::priority_queue<Event, std::vector<Event>, EventOrder> queue_;
