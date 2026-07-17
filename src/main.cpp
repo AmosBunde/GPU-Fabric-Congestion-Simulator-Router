@@ -8,6 +8,7 @@
 #include "gpufab/rng.hpp"
 #include "gpufab/router/ecmp.hpp"
 #include "gpufab/router/flowlet.hpp"
+#include "gpufab/router/rl.hpp"
 #include "gpufab/telemetry.hpp"
 #include "gpufab/topology.hpp"
 #include "gpufab/workloads.hpp"
@@ -26,6 +27,13 @@ std::unique_ptr<IRouter> make_router(const Config& cfg, RngRegistry& rng) {
         cfg.get_i64_or("router.flowlet_gap_us", 0) * kPsPerUs,
         rng.stream("router.flowlet")(),
         cfg.get_i64_or("router.hysteresis_kb", 512) * 1024);
+  }
+  if (name == "rl") {
+    RlRouter::Params p;
+    p.alpha = cfg.get_f64_or("router.rl_alpha", 0.1);
+    p.epsilon0 = cfg.get_f64_or("router.rl_epsilon0", 0.2);
+    p.epsilon_decay = cfg.get_f64_or("router.rl_epsilon_decay", 1000.0);
+    return std::make_unique<RlRouter>(p, rng.stream("router.rl"));
   }
   throw std::runtime_error("unknown router: " + name);
 }
