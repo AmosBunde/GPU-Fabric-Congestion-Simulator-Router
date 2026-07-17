@@ -52,6 +52,16 @@ EngineStats Engine::run() {
         topo_.link(ev.link_id).bytes_dequeued += ev.bytes;
         break;
     }
+    // Deliver completions between events: handlers hold references into
+    // flows_/state_, and a workload's add_flow may reallocate both.
+    while (!completed_pending_.empty()) {
+      const std::int32_t idx = completed_pending_.front();
+      completed_pending_.erase(completed_pending_.begin());
+      if (workload_ != nullptr) {
+        const Flow completed = flows_[static_cast<std::size_t>(idx)];
+        workload_->on_flow_complete(*this, completed);
+      }
+    }
   }
   for (std::size_t i = 0; i < topo_.num_links(); ++i) {
     stats_.drops += topo_.link(static_cast<LinkId>(i)).drops;
@@ -102,6 +112,7 @@ void Engine::on_chunk_arrival(const Event& ev) {
       if (++st.received == num_chunks(f)) {
         f.end_ps = ev.time_ps;
         stats_.last_flow_end_ps = std::max(stats_.last_flow_end_ps, f.end_ps);
+        completed_pending_.push_back(ev.flow_idx);
       }
     }
     Event ack;
