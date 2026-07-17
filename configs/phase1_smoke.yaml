@@ -1,0 +1,20 @@
+# Phase 1 walking skeleton: one flow across a 16-host 2-tier Clos, static
+# ECMP, no congestion. Exercises every layer end-to-end: config -> topology ->
+# router -> engine -> Parquet -> CDF plot.
+seed: 42
+topology:
+  kind: clos2
+  hosts_per_leaf: 4
+  leaves: 4
+  spines: 4
+  host_gbps: 100
+  fabric_gbps: 100
+  prop_us: 1
+router:
+  name: ecmp
+workload:
+  kind: single_flow
+  src: 0
+  dst: 12          # cross-leaf so the flow traverses the spine layer
+  bytes: 1048576   # 1 MiB
+  chunk_bytes: 65536

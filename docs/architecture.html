@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GPU Fabric Congestion Simulator &amp; Router — Architecture</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'JetBrains Mono', monospace; background: #020617; min-height: 100vh; padding: 2rem; color: white; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot { width: 12px; height: 12px; background: #22d3ee; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+    h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 0.85rem; margin-left: 1.75rem; }
+    .diagram-container { background: rgba(15, 23, 42, 0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1.5rem; overflow-x: auto; }
+    svg { width: 100%; min-width: 960px; display: block; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: 2rem; }
+    .card { background: rgba(15, 23, 42, 0.5); border-radius: 0.75rem; border: 1px solid #1e293b; padding: 1.25rem; }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet { background: #a78bfa; }
+    .card-dot.amber { background: #fbbf24; }
+    .card-dot.rose { background: #fb7185; }
+    .card-dot.orange { background: #fb923c; }
+    .card h3 { font-size: 0.85rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.72rem; line-height: 1.5; }
+    .card li { margin-bottom: 0.375rem; }
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.72rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>GPU Fabric Congestion Simulator &amp; Router</h1>
+      </div>
+      <p class="subtitle">Deterministic discrete-event core · pluggable routing control plane · seeded evaluation harness</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1040 660">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="arrowrose" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- ============ ARROWS (drawn first, render behind boxes) ============ -->
+        <!-- inputs -> core -->
+        <line x1="190" y1="122" x2="268" y2="145" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="190" y1="242" x2="268" y2="172" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="205" y="205" fill="#64748b" font-size="8">defines fabric</text>
+        <line x1="190" y1="362" x2="268" y2="345" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="196" y="380" fill="#64748b" font-size="8">injects flows</text>
+
+        <!-- engine -> data-plane -->
+        <line x1="355" y1="200" x2="355" y2="298" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="360" y="255" fill="#64748b" font-size="8">advance events</text>
+
+        <!-- engine <-> routing -->
+        <line x1="440" y1="150" x2="488" y2="150" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <!-- data-plane -> routing (congestion signal) -->
+        <line x1="440" y1="330" x2="488" y2="290" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arrowrose)"/>
+        <text x="430" y="312" fill="#fb7185" font-size="8">queue depth / ECN</text>
+        <!-- routing -> data-plane (path decision) -->
+        <line x1="488" y1="360" x2="440" y2="378" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowrose)"/>
+        <text x="430" y="400" fill="#fb7185" font-size="8">path decision</text>
+
+        <!-- data-plane + routing -> telemetry bus -->
+        <line x1="330" y1="410" x2="330" y2="443" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="580" y1="410" x2="580" y2="443" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- telemetry bus -> results store & eval -->
+        <line x1="672" y1="455" x2="880" y2="332" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="700" y="420" fill="#64748b" font-size="8">raw time-series</text>
+        <line x1="672" y1="450" x2="758" y2="170" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- eval -> results -->
+        <line x1="885" y1="200" x2="885" y2="248" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="892" y="228" fill="#64748b" font-size="8">metrics + CIs</text>
+        <!-- results -> viz -->
+        <line x1="885" y1="330" x2="885" y2="378" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="892" y="358" fill="#64748b" font-size="8">reads runs</text>
+
+        <!-- ============ CORE BOUNDARY ============ -->
+        <rect x="228" y="60" width="452" height="470" rx="12" fill="rgba(52, 211, 153, 0.04)" stroke="#34d399" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="244" y="80" fill="#34d399" font-size="10" font-weight="600">Deterministic Discrete-Event Core — C++20 (single-threaded, virtual clock, fully reproducible)</text>
+
+        <!-- ============ INPUTS ============ -->
+        <rect x="30" y="90" width="160" height="64" rx="6" fill="#0f172a"/>
+        <rect x="30" y="90" width="160" height="64" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="110" y="116" fill="white" font-size="11" font-weight="600" text-anchor="middle">Config + Seeds</text>
+        <text x="110" y="133" fill="#94a3b8" font-size="8" text-anchor="middle">YAML · logged seeds</text>
+        <text x="110" y="145" fill="#94a3b8" font-size="8" text-anchor="middle">one cmd = one figure</text>
+
+        <rect x="30" y="210" width="160" height="64" rx="6" fill="#0f172a"/>
+        <rect x="30" y="210" width="160" height="64" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="110" y="236" fill="white" font-size="11" font-weight="600" text-anchor="middle">Topology Generator</text>
+        <text x="110" y="253" fill="#94a3b8" font-size="8" text-anchor="middle">Clos / fat-tree</text>
+        <text x="110" y="265" fill="#94a3b8" font-size="8" text-anchor="middle">radix · tiers · BW · latency</text>
+
+        <rect x="30" y="330" width="160" height="64" rx="6" fill="#0f172a"/>
+        <rect x="30" y="330" width="160" height="64" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="110" y="356" fill="white" font-size="11" font-weight="600" text-anchor="middle">Workload Generator</text>
+        <text x="110" y="373" fill="#94a3b8" font-size="8" text-anchor="middle">all-reduce (ring/tree)</text>
+        <text x="110" y="385" fill="#94a3b8" font-size="8" text-anchor="middle">incast · permutation</text>
+
+        <!-- ============ ENGINE ============ -->
+        <rect x="270" y="110" width="170" height="90" rx="6" fill="#0f172a"/>
+        <rect x="270" y="110" width="170" height="90" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="355" y="140" fill="white" font-size="12" font-weight="600" text-anchor="middle">Simulation Engine</text>
+        <text x="355" y="160" fill="#94a3b8" font-size="9" text-anchor="middle">event queue · virtual clock</text>
+        <text x="355" y="176" fill="#94a3b8" font-size="9" text-anchor="middle">deterministic scheduler</text>
+        <text x="355" y="192" fill="#34d399" font-size="8" text-anchor="middle">NO real sockets, NO threads</text>
+
+        <!-- ============ DATA PLANE ============ -->
+        <rect x="270" y="300" width="170" height="110" rx="6" fill="#0f172a"/>
+        <rect x="270" y="300" width="170" height="110" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="355" y="326" fill="white" font-size="12" font-weight="600" text-anchor="middle">Data-Plane Model</text>
+        <text x="355" y="346" fill="#94a3b8" font-size="8" text-anchor="middle">per-link queues + buffers</text>
+        <text x="355" y="360" fill="#94a3b8" font-size="8" text-anchor="middle">drop model · ECN marking</text>
+        <text x="355" y="374" fill="#94a3b8" font-size="8" text-anchor="middle">flowlet gaps · in-flight bytes</text>
+        <text x="355" y="394" fill="#34d399" font-size="8" text-anchor="middle">where congestion emerges</text>
+
+        <!-- ============ ROUTING STRATEGY (the contribution) ============ -->
+        <rect x="486" y="104" width="184" height="312" rx="8" fill="transparent" stroke="#fb7185" stroke-width="1.2" stroke-dasharray="5,4"/>
+        <text x="578" y="122" fill="#fb7185" font-size="10" font-weight="700" text-anchor="middle">Routing Control Plane</text>
+        <text x="578" y="135" fill="#fb7185" font-size="8" text-anchor="middle">« one pluggable interface »</text>
+
+        <rect x="500" y="150" width="156" height="52" rx="6" fill="#0f172a"/>
+        <rect x="500" y="150" width="156" height="52" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.3"/>
+        <text x="578" y="172" fill="white" font-size="10" font-weight="600" text-anchor="middle">ECMP baseline</text>
+        <text x="578" y="188" fill="#94a3b8" font-size="8" text-anchor="middle">static hashing (control)</text>
+
+        <rect x="500" y="216" width="156" height="52" rx="6" fill="#0f172a"/>
+        <rect x="500" y="216" width="156" height="52" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.3"/>
+        <text x="578" y="238" fill="white" font-size="10" font-weight="600" text-anchor="middle">Flowlet / CONGA-style</text>
+        <text x="578" y="254" fill="#94a3b8" font-size="8" text-anchor="middle">reactive load balance</text>
+
+        <rect x="500" y="282" width="156" height="120" rx="6" fill="#0f172a"/>
+        <rect x="500" y="282" width="156" height="120" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.8"/>
+        <text x="578" y="306" fill="white" font-size="11" font-weight="700" text-anchor="middle">RL Adaptive Router</text>
+        <text x="578" y="325" fill="#94a3b8" font-size="8" text-anchor="middle">congestion-aware policy</text>
+        <text x="578" y="339" fill="#94a3b8" font-size="8" text-anchor="middle">state = link telemetry</text>
+        <text x="578" y="353" fill="#94a3b8" font-size="8" text-anchor="middle">reward = -tail FCT</text>
+        <text x="578" y="373" fill="#fb7185" font-size="8" font-weight="600" text-anchor="middle">YOUR DIFFERENTIATOR</text>
+        <text x="578" y="388" fill="#fb7185" font-size="7" text-anchor="middle">(ties to your RL/BO MSc)</text>
+
+        <!-- ============ TELEMETRY BUS ============ -->
+        <rect x="270" y="443" width="400" height="26" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.2"/>
+        <text x="470" y="460" fill="#fb923c" font-size="9" text-anchor="middle">Telemetry Stream — queue depth · drops · utilization · per-flow FCT events</text>
+
+        <!-- ============ OUTPUT COLUMN ============ -->
+        <rect x="760" y="110" width="250" height="90" rx="6" fill="#0f172a"/>
+        <rect x="760" y="110" width="250" height="90" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="885" y="138" fill="white" font-size="12" font-weight="600" text-anchor="middle">Evaluation Harness</text>
+        <text x="885" y="158" fill="#94a3b8" font-size="8" text-anchor="middle">seeded sweeps · N runs/config</text>
+        <text x="885" y="172" fill="#94a3b8" font-size="8" text-anchor="middle">p50 / p99 / p999 FCT · CIs</text>
+        <text x="885" y="190" fill="#34d399" font-size="8" text-anchor="middle">orchestrates repeated engine runs</text>
+
+        <rect x="760" y="250" width="250" height="80" rx="6" fill="#0f172a"/>
+        <rect x="760" y="250" width="250" height="80" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="885" y="278" fill="white" font-size="12" font-weight="600" text-anchor="middle">Results Store</text>
+        <text x="885" y="298" fill="#94a3b8" font-size="8" text-anchor="middle">Parquet / CSV · run manifests</text>
+        <text x="885" y="313" fill="#94a3b8" font-size="8" text-anchor="middle">git-tracked config + seed hash</text>
+
+        <rect x="760" y="380" width="250" height="120" rx="6" fill="#0f172a"/>
+        <rect x="760" y="380" width="250" height="120" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="885" y="408" fill="white" font-size="12" font-weight="600" text-anchor="middle">Visualization</text>
+        <text x="885" y="428" fill="#94a3b8" font-size="9" text-anchor="middle">Python + Plotly / matplotlib</text>
+        <text x="885" y="446" fill="#94a3b8" font-size="9" text-anchor="middle">FCT CDFs (offline, mandatory)</text>
+        <text x="885" y="462" fill="#94a3b8" font-size="9" text-anchor="middle">link-utilization heatmap</text>
+        <text x="885" y="482" fill="#22d3ee" font-size="8" text-anchor="middle">live heatmap = optional polish</text>
+
+        <!-- ============ LEGEND (below all boundaries) ============ -->
+        <rect x="30" y="560" width="16" height="10" rx="2" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="52" y="569" fill="#94a3b8" font-size="8">Core / compute (C++)</text>
+        <rect x="200" y="560" width="16" height="10" rx="2" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="222" y="569" fill="#94a3b8" font-size="8">Routing plug-in (the contribution)</text>
+        <rect x="470" y="560" width="16" height="10" rx="2" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
+        <text x="492" y="569" fill="#94a3b8" font-size="8">Telemetry stream</text>
+        <rect x="640" y="560" width="16" height="10" rx="2" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="662" y="569" fill="#94a3b8" font-size="8">Results store</text>
+        <rect x="790" y="560" width="16" height="10" rx="2" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="812" y="569" fill="#94a3b8" font-size="8">Visualization</text>
+        <rect x="30" y="580" width="16" height="10" rx="2" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="52" y="589" fill="#94a3b8" font-size="8">Inputs / generic</text>
+        <line x1="200" y1="585" x2="216" y2="585" stroke="#fb7185" stroke-width="1.2" stroke-dasharray="4,3"/>
+        <text x="222" y="589" fill="#94a3b8" font-size="8">Congestion feedback loop (data-plane ↔ router)</text>
+      </svg>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="card-header"><div class="card-dot emerald"></div><h3>Non-negotiable invariants</h3></div>
+        <ul>
+          <li>• Single-threaded discrete-event sim: virtual clock, no wall-clock, no OS sockets in the model path.</li>
+          <li>• Same seed + same config = byte-identical results, forever.</li>
+          <li>• Every figure regenerates from one command against a git-tracked config.</li>
+          <li>• Validation gate before any router work: reproduce a known incast-collapse curve.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot rose"></div><h3>Where the signal lives</h3></div>
+        <ul>
+          <li>• One IRouter interface; ECMP / flowlet / RL swap behind it with zero engine changes.</li>
+          <li>• ECMP is the control, not a feature. You must beat it to have a result.</li>
+          <li>• RL router is the defensible edge and maps to your RL + Bayesian-opt background.</li>
+          <li>• The router computes paths; it must never see wall-clock time.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot violet"></div><h3>What a reviewer reads first</h3></div>
+        <ul>
+          <li>• FCT CDFs (p50/p99/p999) with confidence intervals across seeds, not one run.</li>
+          <li>• A clear baseline-vs-adaptive delta on a stated topology and workload.</li>
+          <li>• Honest scale (128–1024 nodes), never "hundreds of thousands".</li>
+          <li>• A README that states the thesis, the result, and the limitations up front.</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="footer">
+      GPU-Fabric-Congestion-Simulator-Router • C++20 core · Python eval/viz · CMake + CTest · reproducible-by-construction
+    </p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  sanitized-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (ASan + UBSan, warnings-as-errors)
+        run: cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DGPUFAB_SANITIZE=ON
+      - name: Build
+        run: cmake --build build-san -j
+      - name: Test
+        run: ctest --test-dir build-san --output-on-failure
+
+  end-to-end:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (Release)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build -j
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+      - name: One command, one figure
+        run: python python/run.py configs/phase1_smoke.yaml
+      - name: Verify run artifacts
+        run: |
+          run_dir=$(ls -d results/*/ | head -1)
+          for f in config.yaml sim.cfg manifest.json seeds.txt flows.csv flows.parquet fct_cdf.png; do
+            test -f "$run_dir/$f" || { echo "missing $f"; exit 1; }
+          done
+          echo "all artifacts present in $run_dir"
