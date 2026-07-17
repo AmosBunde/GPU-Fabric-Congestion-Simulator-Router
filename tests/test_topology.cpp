@@ -35,11 +35,13 @@ int main() {
 
   // ECMP produces a valid cross-leaf path: every hop is a real link.
   EcmpRouter router(0xabcdef);
+  const std::vector<double> no_util(t.num_links(), 0.0);
+  const FabricView view(t, no_util);
   Flow f;
   f.id = 7;
   f.src = 0;
   f.dst = 12;
-  const auto path = router.route(f, t);
+  const auto path = router.route(f, view);
   CHECK(path.size() == 5);
   CHECK(path.front() == 0 && path.back() == 12);
   for (std::size_t i = 0; i + 1 < path.size(); ++i) {
@@ -48,7 +50,7 @@ int main() {
 
   // Same-leaf traffic never touches a spine.
   f.dst = 1;
-  const auto short_path = router.route(f, t);
+  const auto short_path = router.route(f, view);
   CHECK(short_path.size() == 3);
   CHECK(t.kind(short_path[1]) == NodeKind::Leaf);
   return 0;

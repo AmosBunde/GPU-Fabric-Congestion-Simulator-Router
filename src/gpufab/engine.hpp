@@ -123,6 +123,9 @@ class Engine {
     Ps last_md_ps = -1;    // last multiplicative decrease (once per RTT)
     std::int32_t snd_una = 0;   // oldest unacked chunk (first-send order)
     std::int32_t dup_acks = 0;  // acks for later chunks while snd_una waits
+    Ps last_send_ps = -1;       // for flowlet-boundary reroute decisions
+    Ps base_delay_ps = 0;       // uncongested one-way delay of a full chunk
+    std::vector<Ps> sent_ps;    // latest send time per chunk (for feedback)
   };
 
   void schedule(Event ev);
@@ -141,10 +144,13 @@ class Engine {
   IRouter& router_;
   std::int64_t chunk_bytes_;
   TransportParams transport_;
+  FabricView view() const { return FabricView(topo_, util_ewma_); }
+
   IWorkload* workload_ = nullptr;
   std::vector<std::int32_t> completed_pending_;
   std::int32_t completed_count_ = 0;
   Ps sample_interval_ = 0;
+  std::vector<double> util_ewma_;
   std::vector<LinkSample> samples_;
   std::vector<std::int64_t> bytes_at_last_sample_;
   std::vector<Flow> flows_;

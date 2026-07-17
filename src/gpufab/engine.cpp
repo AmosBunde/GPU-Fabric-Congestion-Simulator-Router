@@ -16,6 +16,7 @@ Engine::Engine(Topology& topo, IRouter& router, std::int64_t chunk_bytes,
   if (transport_.window_chunks < 1.0 || transport_.rto_ps <= 0) {
     throw std::invalid_argument("transport: window >= 1 and rto > 0 required");
   }
+  util_ewma_.assign(topo_.num_links(), 0.0);
 }
 
 void Engine::add_flow(Flow flow) {
@@ -99,6 +100,7 @@ void Engine::on_telemetry_sample(const Event& ev) {
                      static_cast<double>(sample_interval_));
     s.drops_cum = l.drops;
     s.ecn_marks_cum = l.ecn_marks;
+    util_ewma_[i] = 0.8 * util_ewma_[i] + 0.2 * s.utilization;
     samples_.push_back(s);
   }
   if (completed_count_ < static_cast<std::int32_t>(flows_.size())) {
@@ -112,7 +114,7 @@ void Engine::on_telemetry_sample(const Event& ev) {
 void Engine::on_flow_start(const Event& ev) {
   Flow& f = flows_[static_cast<std::size_t>(ev.flow_idx)];
   FlowState& st = state_[static_cast<std::size_t>(ev.flow_idx)];
-  f.path = router_.route(f, topo_);
+  f.path = router_.route(f, view());
   if (f.path.size() < 2) {
     throw std::runtime_error("router returned degenerate path for flow " +
                              std::to_string(f.id));
@@ -121,6 +123,7 @@ void Engine::on_flow_start(const Event& ev) {
   st.chunk_acked.assign(static_cast<std::size_t>(n), 0);
   st.chunk_received.assign(static_cast<std::size_t>(n), 0);
   st.attempts.assign(static_cast<std::size_t>(n), 0);
+  st.sent_ps.assign(static_cast<std::size_t>(n), 0);
   st.window = transport_.window_chunks;
   Ps prop_total = 0;
   Ps ser_total = 0;
@@ -131,6 +134,9 @@ void Engine::on_flow_start(const Event& ev) {
   }
   st.ack_delay_ps = prop_total;
   st.rtt_est_ps = 2 * prop_total + ser_total;
+  // In a Clos, every reroute preserves hop count and per-hop rates, so the
+  // base delay (and rtt/ack estimates) stay valid across path changes.
+  st.base_delay_ps = ser_total + prop_total;
   try_send(ev.flow_idx, ev.time_ps);
 }
 
@@ -143,6 +149,8 @@ void Engine::on_chunk_arrival(const Event& ev) {
     const auto c = static_cast<std::size_t>(ev.chunk_idx);
     if (!st.chunk_received[c]) {
       st.chunk_received[c] = 1;
+      router_.on_chunk_feedback(
+          f, std::max<Ps>(0, ev.time_ps - st.sent_ps[c] - st.base_delay_ps));
       if (++st.received == num_chunks(f)) {
         f.end_ps = ev.time_ps;
         stats_.last_flow_end_ps = std::max(stats_.last_flow_end_ps, f.end_ps);
@@ -257,8 +265,20 @@ void Engine::try_send(std::int32_t flow_idx, Ps now) {
 }
 
 void Engine::send_chunk(std::int32_t flow_idx, std::int32_t chunk_idx, Ps now) {
+  Flow& f = flows_[static_cast<std::size_t>(flow_idx)];
   FlowState& st = state_[static_cast<std::size_t>(flow_idx)];
   const auto c = static_cast<std::size_t>(chunk_idx);
+
+  // Flowlet boundary: if this router re-routes and the inter-send gap has
+  // elapsed, re-consult it. Chunks already in flight finish on the old path;
+  // the selective-repeat transport tolerates the resulting reordering.
+  const Ps gap = router_.reroute_gap_ps();
+  if (gap >= 0 && st.last_send_ps >= 0 && now - st.last_send_ps >= gap) {
+    f.path = router_.route(f, view());
+  }
+  st.last_send_ps = now;
+  st.sent_ps[c] = now;
+
   if (st.attempts[c] == 0) ++st.inflight;  // retransmits are already inflight
   ++st.attempts[c];
 
