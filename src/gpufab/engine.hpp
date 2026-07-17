@@ -16,11 +16,12 @@ namespace gpufab {
 // to see queue buildup and drops, coarse enough to run ~1024 nodes replaying
 // all-reduce in seconds.
 enum class EventType : std::uint8_t {
-  FlowStart,     // ask router for a path, open the transport window at src
-  ChunkArrival,  // a chunk reached path[hop]; forward, or deliver at dst
-  AckArrival,    // dst's ack (with ECN echo) reached the source
-  TimeoutCheck,  // RTO fired for a chunk; retransmit if still unacked
-  LinkDequeue,   // a chunk finished serializing; free its queue bytes
+  FlowStart,        // ask router for a path, open the transport window at src
+  ChunkArrival,     // a chunk reached path[hop]; forward, or deliver at dst
+  AckArrival,       // dst's ack (with ECN echo) reached the source
+  TimeoutCheck,     // RTO fired for a chunk; retransmit if still unacked
+  LinkDequeue,      // a chunk finished serializing; free its queue bytes
+  TelemetrySample,  // periodic per-link congestion snapshot
 };
 
 struct Event {
@@ -56,6 +57,17 @@ struct EngineStats {
   std::int64_t ecn_marks = 0;  // summed over links at end of run
 };
 
+// One row of the per-link congestion time series, sampled every
+// telemetry interval while any flow is incomplete.
+struct LinkSample {
+  Ps time_ps = 0;
+  LinkId link = -1;
+  std::int64_t queue_bytes = 0;
+  double utilization = 0.0;  // fraction of line rate over the last interval
+  std::int64_t drops_cum = 0;
+  std::int64_t ecn_marks_cum = 0;
+};
+
 class Engine;
 
 // A workload injects flows: the initial set in start(), and — for multi-step
@@ -82,9 +94,12 @@ class Engine {
 
   void add_flow(Flow flow);
   void set_workload(IWorkload* workload) { workload_ = workload; }
+  // 0 disables sampling. Sampling stops once every flow has completed.
+  void set_telemetry_interval(Ps interval_ps) { sample_interval_ = interval_ps; }
   EngineStats run();
 
   const std::vector<Flow>& flows() const { return flows_; }
+  const std::vector<LinkSample>& link_samples() const { return samples_; }
 
  private:
   struct EventOrder {
@@ -106,9 +121,12 @@ class Engine {
     Ps ack_delay_ps = 0;   // reverse-path propagation
     Ps rtt_est_ps = 0;     // base RTT: 2*prop + per-hop serialization
     Ps last_md_ps = -1;    // last multiplicative decrease (once per RTT)
+    std::int32_t snd_una = 0;   // oldest unacked chunk (first-send order)
+    std::int32_t dup_acks = 0;  // acks for later chunks while snd_una waits
   };
 
   void schedule(Event ev);
+  void on_telemetry_sample(const Event& ev);
   void on_flow_start(const Event& ev);
   void on_chunk_arrival(const Event& ev);
   void on_ack_arrival(const Event& ev);
@@ -125,6 +143,10 @@ class Engine {
   TransportParams transport_;
   IWorkload* workload_ = nullptr;
   std::vector<std::int32_t> completed_pending_;
+  std::int32_t completed_count_ = 0;
+  Ps sample_interval_ = 0;
+  std::vector<LinkSample> samples_;
+  std::vector<std::int64_t> bytes_at_last_sample_;
   std::vector<Flow> flows_;
   std::vector<FlowState> state_;
   std::priority_queue<Event, std::vector<Event>, EventOrder> queue_;

@@ -84,6 +84,8 @@ int run(const std::string& config_path, const std::string& out_dir) {
 
   auto router = make_router(cfg, rng);
   Engine engine(topo, *router, cfg.get_i64("workload.chunk_bytes"), transport);
+  engine.set_telemetry_interval(cfg.get_i64_or("telemetry.sample_us", 10) *
+                                kPsPerUs);
   auto workload = make_workload(cfg, topo, rng);
   engine.set_workload(workload.get());
   workload->start(engine);
@@ -92,6 +94,7 @@ int run(const std::string& config_path, const std::string& out_dir) {
 
   std::filesystem::create_directories(out_dir);
   write_flows_csv(out_dir + "/flows.csv", engine.flows());
+  write_links_csv(out_dir + "/links.csv", engine.link_samples(), topo);
   write_seeds_txt(out_dir + "/seeds.txt", rng);
 
   std::printf(

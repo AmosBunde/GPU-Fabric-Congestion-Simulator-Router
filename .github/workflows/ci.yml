@@ -32,6 +32,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: One command, one figure
         run: python python/run.py configs/phase1_smoke.yaml
+      - name: Validation gate (quick) — incast collapse must reproduce
+        run: python python/validate_incast.py --quick
       - name: Verify run artifacts
         run: |
           run_dir=$(ls -d results/*/ | head -1)

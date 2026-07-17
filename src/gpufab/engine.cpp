@@ -30,6 +30,13 @@ void Engine::add_flow(Flow flow) {
 }
 
 EngineStats Engine::run() {
+  if (sample_interval_ > 0 && !flows_.empty()) {
+    bytes_at_last_sample_.assign(topo_.num_links(), 0);
+    Event ev;
+    ev.time_ps = sample_interval_;
+    ev.type = EventType::TelemetrySample;
+    schedule(ev);
+  }
   while (!queue_.empty()) {
     const Event ev = queue_.top();
     queue_.pop();
@@ -50,6 +57,9 @@ EngineStats Engine::run() {
       case EventType::LinkDequeue:
         topo_.link(ev.link_id).queue_bytes -= ev.bytes;
         topo_.link(ev.link_id).bytes_dequeued += ev.bytes;
+        break;
+      case EventType::TelemetrySample:
+        on_telemetry_sample(ev);
         break;
     }
     // Deliver completions between events: handlers hold references into
@@ -73,6 +83,30 @@ EngineStats Engine::run() {
 void Engine::schedule(Event ev) {
   ev.seq = next_seq_++;
   queue_.push(ev);
+}
+
+void Engine::on_telemetry_sample(const Event& ev) {
+  for (std::size_t i = 0; i < topo_.num_links(); ++i) {
+    const Link& l = topo_.link(static_cast<LinkId>(i));
+    const std::int64_t delta = l.bytes_dequeued - bytes_at_last_sample_[i];
+    bytes_at_last_sample_[i] = l.bytes_dequeued;
+    LinkSample s;
+    s.time_ps = ev.time_ps;
+    s.link = static_cast<LinkId>(i);
+    s.queue_bytes = l.queue_bytes;
+    s.utilization = static_cast<double>(delta * 8 * 1000) /
+                    (static_cast<double>(l.gbps) *
+                     static_cast<double>(sample_interval_));
+    s.drops_cum = l.drops;
+    s.ecn_marks_cum = l.ecn_marks;
+    samples_.push_back(s);
+  }
+  if (completed_count_ < static_cast<std::int32_t>(flows_.size())) {
+    Event next;
+    next.time_ps = ev.time_ps + sample_interval_;
+    next.type = EventType::TelemetrySample;
+    schedule(next);
+  }
 }
 
 void Engine::on_flow_start(const Event& ev) {
@@ -112,6 +146,7 @@ void Engine::on_chunk_arrival(const Event& ev) {
       if (++st.received == num_chunks(f)) {
         f.end_ps = ev.time_ps;
         stats_.last_flow_end_ps = std::max(stats_.last_flow_end_ps, f.end_ps);
+        ++completed_count_;
         completed_pending_.push_back(ev.flow_idx);
       }
     }
@@ -159,6 +194,7 @@ void Engine::on_chunk_arrival(const Event& ev) {
 }
 
 void Engine::on_ack_arrival(const Event& ev) {
+  Flow& f = flows_[static_cast<std::size_t>(ev.flow_idx)];
   FlowState& st = state_[static_cast<std::size_t>(ev.flow_idx)];
   const auto c = static_cast<std::size_t>(ev.chunk_idx);
   if (st.chunk_acked[c]) return;  // duplicate (retransmit raced the ack)
@@ -170,7 +206,29 @@ void Engine::on_ack_arrival(const Event& ev) {
       st.last_md_ps = ev.time_ps;
     }
   } else {
-    st.window += 1.0 / st.window;  // additive increase, per acked chunk
+    // Additive increase per acked chunk, capped at the configured window —
+    // the model's stand-in for the receiver/OS window limit.
+    st.window = std::min(st.window + 1.0 / st.window, transport_.window_chunks);
+  }
+
+  // SACK-style fast retransmit: three acks for later chunks while the oldest
+  // is still outstanding mean it was almost certainly dropped — recover in an
+  // RTT with a window halving instead of stalling a full RTO. RTO remains the
+  // backstop when a whole window is lost (no acks flow: the incast case).
+  const std::int32_t n = num_chunks(f);
+  if (ev.chunk_idx == st.snd_una) {
+    while (st.snd_una < n &&
+           st.chunk_acked[static_cast<std::size_t>(st.snd_una)]) {
+      ++st.snd_una;
+    }
+    st.dup_acks = 0;
+  } else if (ev.chunk_idx > st.snd_una &&
+             st.snd_una < st.next_unsent &&  // snd_una actually sent
+             ++st.dup_acks >= 3) {
+    st.dup_acks = 0;
+    ++f.retransmits;
+    st.window = std::max(1.0, st.window / 2.0);
+    send_chunk(ev.flow_idx, st.snd_una, ev.time_ps);
   }
   try_send(ev.flow_idx, ev.time_ps);
 }
