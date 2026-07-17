@@ -29,7 +29,7 @@ add_executable(gpufab_sim src/main.cpp)
 target_link_libraries(gpufab_sim PRIVATE gpufab_core)
 
 enable_testing()
-foreach(t test_config test_rng test_topology test_engine_fct)
+foreach(t test_config test_rng test_topology test_engine_fct test_congestion)
   add_executable(${t} tests/${t}.cpp)
   target_link_libraries(${t} PRIVATE gpufab_core)
   add_test(NAME ${t} COMMAND ${t})

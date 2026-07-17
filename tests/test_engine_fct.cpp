@@ -18,7 +18,12 @@ gpufab::Ps run_once() {
   using namespace gpufab;
   Topology t = Topology::clos2(4, 4, 4, 100, 100, kPsPerUs);
   EcmpRouter router(0x5eed);
-  Engine engine(t, router, 65536);
+  // Neutralize the transport (huge window, RTO far beyond the run) and keep
+  // the default infinite buffers so the analytic pipeline value still holds.
+  TransportParams tp;
+  tp.window_chunks = 1e9;
+  tp.rto_ps = 1'000'000 * kPsPerUs;
+  Engine engine(t, router, 65536, tp);
   Flow f;
   f.id = 0;
   f.src = 0;

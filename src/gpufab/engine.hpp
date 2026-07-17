@@ -13,12 +13,14 @@ namespace gpufab {
 
 // Event granularity — the packet-train / chunk model (locked Decision 1).
 // The engine schedules one event per chunk-hop, not per packet: fine enough
-// to see queue buildup once the Phase 2 data plane lands, coarse enough to
-// run ~1024 nodes replaying all-reduce in seconds.
+// to see queue buildup and drops, coarse enough to run ~1024 nodes replaying
+// all-reduce in seconds.
 enum class EventType : std::uint8_t {
-  FlowStart,     // ask router for a path, inject the flow's chunks at src
-  ChunkArrival,  // a chunk reached path[hop]; forward or complete the flow
-  // Phase 2: CongestionUpdate — periodic per-link telemetry refresh
+  FlowStart,     // ask router for a path, open the transport window at src
+  ChunkArrival,  // a chunk reached path[hop]; forward, or deliver at dst
+  AckArrival,    // dst's ack (with ECN echo) reached the source
+  TimeoutCheck,  // RTO fired for a chunk; retransmit if still unacked
+  LinkDequeue,   // a chunk finished serializing; free its queue bytes
 };
 
 struct Event {
@@ -28,18 +30,38 @@ struct Event {
   std::int32_t flow_idx = -1;
   std::int32_t chunk_idx = -1;
   std::int32_t hop_idx = -1;
+  std::int32_t epoch = 0;    // TimeoutCheck: send attempt this timer guards
+  LinkId link_id = -1;       // LinkDequeue
+  std::int64_t bytes = 0;    // LinkDequeue
+  bool ecn = false;          // ChunkArrival/AckArrival: congestion-experienced
+};
+
+// Minimal windowed transport, per flow: chunks are sent up to a congestion
+// window; acks (delayed by the reverse-path propagation, consuming no
+// bandwidth) advance the window additively; ECN echoes halve it at most once
+// per RTT; a lost chunk is recovered by RTO with exponential backoff, which
+// also collapses the window to one chunk. Deliberately TCP-shaped without
+// being TCP: just enough for drops to have consequences and congestion to
+// self-regulate.
+struct TransportParams {
+  double window_chunks = 8.0;
+  Ps rto_ps = 500 * kPsPerUs;
+  std::int32_t max_backoff_doublings = 6;
 };
 
 struct EngineStats {
   std::uint64_t events_processed = 0;
-  Ps end_time_ps = 0;
+  Ps last_flow_end_ps = 0;
+  std::int64_t drops = 0;      // summed over links at end of run
+  std::int64_t ecn_marks = 0;  // summed over links at end of run
 };
 
 // Single-threaded deterministic discrete-event engine. Virtual clock only —
 // no wall-clock, no sockets, no threads anywhere in the model path.
 class Engine {
  public:
-  Engine(Topology& topo, IRouter& router, std::int64_t chunk_bytes);
+  Engine(Topology& topo, IRouter& router, std::int64_t chunk_bytes,
+         TransportParams transport);
 
   void add_flow(Flow flow);
   EngineStats run();
@@ -54,18 +76,37 @@ class Engine {
     }
   };
 
-  void schedule(Ps time_ps, EventType type, std::int32_t flow_idx,
-                std::int32_t chunk_idx, std::int32_t hop_idx);
+  // Per-flow transport state, index-parallel with flows_.
+  struct FlowState {
+    double window = 1.0;
+    std::int32_t inflight = 0;     // first-sent, not-yet-acked chunks
+    std::int32_t next_unsent = 0;
+    std::int32_t received = 0;     // distinct chunks delivered at dst
+    std::vector<std::uint8_t> chunk_acked;
+    std::vector<std::uint8_t> chunk_received;
+    std::vector<std::int32_t> attempts;  // send attempts per chunk
+    Ps ack_delay_ps = 0;   // reverse-path propagation
+    Ps rtt_est_ps = 0;     // base RTT: 2*prop + per-hop serialization
+    Ps last_md_ps = -1;    // last multiplicative decrease (once per RTT)
+  };
+
+  void schedule(Event ev);
   void on_flow_start(const Event& ev);
   void on_chunk_arrival(const Event& ev);
+  void on_ack_arrival(const Event& ev);
+  void on_timeout(const Event& ev);
+  void try_send(std::int32_t flow_idx, Ps now);
+  void send_chunk(std::int32_t flow_idx, std::int32_t chunk_idx, Ps now);
+  Ps rto_for_attempt(std::int32_t attempt) const;
   std::int32_t num_chunks(const Flow& f) const;
   std::int64_t chunk_size(const Flow& f, std::int32_t chunk_idx) const;
 
   Topology& topo_;
   IRouter& router_;
   std::int64_t chunk_bytes_;
+  TransportParams transport_;
   std::vector<Flow> flows_;
-  std::vector<std::int32_t> chunks_remaining_;
+  std::vector<FlowState> state_;
   std::priority_queue<Event, std::vector<Event>, EventOrder> queue_;
   std::uint64_t next_seq_ = 0;
   EngineStats stats_;

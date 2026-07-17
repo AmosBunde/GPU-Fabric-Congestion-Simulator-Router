@@ -24,11 +24,13 @@ std::string path_to_string(const std::vector<NodeId>& path) {
 
 void write_flows_csv(const std::string& path, const std::vector<Flow>& flows) {
   auto out = open_or_throw(path);
-  out << "flow_id,src,dst,bytes,start_ps,end_ps,fct_ps,path\n";
+  out << "flow_id,src,dst,bytes,start_ps,end_ps,fct_ps,retransmits,timeouts,"
+         "path\n";
   for (const Flow& f : flows) {
     out << f.id << ',' << f.src << ',' << f.dst << ',' << f.bytes << ','
         << f.start_ps << ',' << f.end_ps << ',' << f.fct_ps() << ','
-        << path_to_string(f.path) << '\n';
+        << f.retransmits << ',' << f.timeouts << ',' << path_to_string(f.path)
+        << '\n';
   }
 }
 

@@ -21,9 +21,20 @@ struct Link {
   std::int64_t gbps = 0;
   Ps prop_ps = 0;
   // Virtual time until which the transmitter is serializing earlier chunks.
-  // This is the seed of the data-plane model; Phase 2 replaces it with real
-  // queues, buffer limits, and drops.
   Ps busy_until_ps = 0;
+
+  // Egress queue model: bytes standing in the FIFO (waiting + in service),
+  // tail-dropped against buffer_bytes; chunks are ECN-marked on enqueue when
+  // the standing queue is at or above ecn_threshold_bytes. Defaults are
+  // effectively infinite / never-mark; main.cpp applies configured values.
+  std::int64_t queue_bytes = 0;
+  std::int64_t buffer_bytes = INT64_MAX / 4;
+  std::int64_t ecn_threshold_bytes = INT64_MAX / 4;
+
+  // Cumulative counters for telemetry.
+  std::int64_t drops = 0;
+  std::int64_t ecn_marks = 0;
+  std::int64_t bytes_dequeued = 0;
 };
 
 // Two-tier Clos: hosts -> leaves -> spines, every leaf connected to every

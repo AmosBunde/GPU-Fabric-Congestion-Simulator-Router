@@ -52,8 +52,22 @@ int run(const std::string& config_path, const std::string& out_dir) {
       cfg.get_i64("topology.host_gbps"), cfg.get_i64("topology.fabric_gbps"),
       cfg.get_i64("topology.prop_us") * kPsPerUs);
 
+  // Uniform data-plane parameters across links; defaults keep small configs
+  // congestion-free unless the config opts in.
+  const std::int64_t buffer_b = cfg.get_i64_or("link.buffer_kb", 256) * 1024;
+  const std::int64_t ecn_b = cfg.get_i64_or("link.ecn_threshold_kb", 64) * 1024;
+  for (std::size_t i = 0; i < topo.num_links(); ++i) {
+    topo.link(static_cast<LinkId>(i)).buffer_bytes = buffer_b;
+    topo.link(static_cast<LinkId>(i)).ecn_threshold_bytes = ecn_b;
+  }
+
+  TransportParams transport;
+  transport.window_chunks =
+      static_cast<double>(cfg.get_i64_or("transport.window_chunks", 8));
+  transport.rto_ps = cfg.get_i64_or("transport.rto_us", 500) * kPsPerUs;
+
   auto router = make_router(cfg, rng);
-  Engine engine(topo, *router, cfg.get_i64("workload.chunk_bytes"));
+  Engine engine(topo, *router, cfg.get_i64("workload.chunk_bytes"), transport);
   add_workload(cfg, engine);
 
   const EngineStats stats = engine.run();
@@ -62,11 +76,14 @@ int run(const std::string& config_path, const std::string& out_dir) {
   write_flows_csv(out_dir + "/flows.csv", engine.flows());
   write_seeds_txt(out_dir + "/seeds.txt", rng);
 
-  std::printf("gpufab_sim: router=%s events=%llu end_time_ps=%lld flows=%zu\n",
-              router->name().c_str(),
-              static_cast<unsigned long long>(stats.events_processed),
-              static_cast<long long>(stats.end_time_ps),
-              engine.flows().size());
+  std::printf(
+      "gpufab_sim: router=%s events=%llu last_end_ps=%lld flows=%zu "
+      "drops=%lld ecn_marks=%lld\n",
+      router->name().c_str(),
+      static_cast<unsigned long long>(stats.events_processed),
+      static_cast<long long>(stats.last_flow_end_ps), engine.flows().size(),
+      static_cast<long long>(stats.drops),
+      static_cast<long long>(stats.ecn_marks));
   return 0;
 }
 
