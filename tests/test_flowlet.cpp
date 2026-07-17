@@ -80,8 +80,11 @@ int main() {
   CHECK(collide_id > 0);
 
   // Flowlet routing spreads what ECMP collides: strictly better makespan.
+  // Same salt as ECMP so the initial (all-queues-zero) choice collides
+  // identically — the improvement must come from congestion-aware rerouting.
+  constexpr std::int64_t kHyst = 512 * 1024;
   EcmpRouter ecmp(kSalt);
-  FlowletRouter flowlet(0);  // re-evaluate at every chunk boundary
+  FlowletRouter flowlet(0, kSalt, kHyst);  // re-evaluate every chunk boundary
   const Ps ecmp_makespan = run_pair(ecmp, 0, collide_id);
   const Ps flowlet_makespan = run_pair(flowlet, 0, collide_id);
   std::printf("makespan: ecmp=%lld flowlet=%lld\n",
@@ -93,7 +96,7 @@ int main() {
   // The flowlet router actually used more than one spine for the pair.
   {
     Topology t2 = Topology::clos2(4, 4, 4, 100, 100, kPsPerUs);
-    FlowletRouter fr(0);
+    FlowletRouter fr(0, kSalt, kHyst);
     Engine engine(t2, fr, 65536, TransportParams{});
     Flow a = fa, b = fb;
     a.id = 0;
@@ -108,7 +111,7 @@ int main() {
   }
 
   // Determinism: identical makespan on a rerun.
-  FlowletRouter flowlet2(0);
+  FlowletRouter flowlet2(0, kSalt, kHyst);
   CHECK(run_pair(flowlet2, 0, collide_id) == flowlet_makespan);
   return 0;
 }
