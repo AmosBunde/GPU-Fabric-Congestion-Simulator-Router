@@ -15,16 +15,30 @@ how much tail-FCT does congestion-aware adaptive routing (a flowlet/CONGA-style
 heuristic, and an RL policy trained on link telemetry) recover over static
 ECMP, on Clos topologies up to 1024 nodes?
 
-**Headline result.** *Pending — Phases 0–1 (reproducibility spine and walking
-skeleton) are complete; the congestion model and validation gate (Phase 2)
-come next. No routing comparison is claimed until the simulator reproduces a
-known incast throughput-collapse curve.*
+**Headline result.** On a 64-host, 4:1-oversubscribed Clos running 2 MiB
+uniform-permutation traffic (20 paired seeds), **congestion-aware flowlet
+routing halves p99 flow-completion time versus ECMP** (15.9 ms → 7.9 ms,
+median unchanged — the win lives in the tail). The RL router — a tabular
+contextual bandit with information parity to the heuristic — **underperforms
+both baselines**, and the diagnosis is the interesting part: many concurrent
+senders greedily sharing one learned policy herd onto the same spine, and
+less exploration makes it *worse*; the heuristic's stickiness + hysteresis is
+precisely the coordination a per-decision learned policy lacks. Full numbers
+and analysis: [docs/RESULTS.md](docs/RESULTS.md). The simulator itself is
+validated: it reproduces the classic incast throughput-collapse curve
+(goodput 0.98 of line rate at 8 senders → 0.08 at 63; cf. Vasudevan et al.,
+SIGCOMM 2009) and runs a 1024-host ring all-reduce (2.1 M flows, 17 M
+events) in 5.5 s on one core.
 
 **Limitations.** Simulated fabric, packet-train (chunk) granularity — not
 per-packet; virtual clock, single-threaded core; validated at 16–128 nodes,
 headline scale 1024 nodes; single failure domain; no dynamic topology changes;
-no PFC/lossless-fabric modeling yet. These bounds are deliberate and stated up
-front: they are the boundary of the claim, not an apology for it.
+no PFC/lossless-fabric modeling. The transport's ECN response is a blunt
+once-per-RTT halving (not DCTCP-proportional), so the validation gate rests
+on the no-ECN tail-drop curve. Under any rerouting scheme, p999 can regress
+on a minority of seeds via RTO-backoff cascades (2/20 seeds for flowlet).
+These bounds are deliberate and stated up front: they are the boundary of
+the claim, not an apology for it.
 
 ---
 
@@ -256,10 +270,19 @@ YAML→Parquet→PNG pipeline end-to-end.
 |---|---|---|---|
 | 0 | Reproducibility spine | ctest green on stubs; one command → hash-stamped results dir | **Done** |
 | 1 | Walking skeleton | An FCT CDF produced end-to-end through every layer | **Done** |
-| 2 | Congestion emerges + validation | Plot next to a citation: incast throughput collapse reproduced | Next |
-| 3 | Baselines + evaluation harness | ECMP vs flowlet CDF across many seeds, with error bands | — |
-| 4 | RL adaptive router | Three-way CDF with CIs + honest analysis of where RL helps | — |
-| 5 | Visualization + writeup | Link-utilization heatmap; README leads with thesis, result, limitations | — |
+| 2 | Congestion emerges + validation | Plot next to a citation: incast throughput collapse reproduced | **Done** — `python/validate_incast.py`, gate enforced in CI |
+| 3 | Baselines + evaluation harness | ECMP vs flowlet CDF across many seeds, with error bands | **Done** — p99 halved, `python/harness.py` |
+| 4 | RL adaptive router | Three-way CDF with CIs + honest analysis of where RL helps | **Done** — clean negative result, [docs/RESULTS.md](docs/RESULTS.md) |
+| 5 | Visualization + writeup | Link-utilization heatmap; README leads with thesis, result, limitations | **Done** — `python/plot_heatmap.py` |
+
+Reproduce the headline artifacts:
+
+```sh
+.venv/bin/python python/validate_incast.py                    # validation gate
+.venv/bin/python python/harness.py --routers ecmp,flowlet,rl \
+    --seeds 20 --out-dir results/sweep_three_way              # three-way CDF + metrics
+.venv/bin/python python/plot_heatmap.py <run_dir>             # utilization heatmap
+```
 
 Scale policy: the headline number is **1024 simulated nodes**, validated at
 16–128. This README will never drift toward "hundreds of thousands."
