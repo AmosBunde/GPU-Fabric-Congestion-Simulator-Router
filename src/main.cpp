@@ -7,6 +7,7 @@
 #include "gpufab/engine.hpp"
 #include "gpufab/rng.hpp"
 #include "gpufab/router/ecmp.hpp"
+#include "gpufab/router/flowlet.hpp"
 #include "gpufab/telemetry.hpp"
 #include "gpufab/topology.hpp"
 #include "gpufab/workloads.hpp"
@@ -19,6 +20,10 @@ std::unique_ptr<IRouter> make_router(const Config& cfg, RngRegistry& rng) {
   const std::string name = cfg.get_str("router.name");
   if (name == "ecmp") {
     return std::make_unique<EcmpRouter>(rng.stream("router.ecmp")());
+  }
+  if (name == "flowlet") {
+    return std::make_unique<FlowletRouter>(
+        cfg.get_i64_or("router.flowlet_gap_us", 0) * kPsPerUs);
   }
   throw std::runtime_error("unknown router: " + name);
 }
