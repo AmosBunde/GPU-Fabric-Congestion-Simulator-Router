@@ -18,6 +18,8 @@ struct Flow {
   // Filled in by the engine.
   std::vector<NodeId> path;
   Ps end_ps = -1;  // -1 until complete
+  std::int64_t retransmits = 0;
+  std::int64_t timeouts = 0;
 
   Ps fct_ps() const { return end_ps < 0 ? -1 : end_ps - start_ps; }
 };
