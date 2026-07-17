@@ -44,4 +44,9 @@ std::int64_t Config::get_i64_or(const std::string& key,
   return it == kv_.end() ? fallback : std::stoll(it->second);
 }
 
+double Config::get_f64_or(const std::string& key, double fallback) const {
+  auto it = kv_.find(key);
+  return it == kv_.end() ? fallback : std::stod(it->second);
+}
+
 }  // namespace gpufab

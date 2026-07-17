@@ -15,6 +15,7 @@ add_library(gpufab_core
   src/gpufab/engine.cpp
   src/gpufab/router/ecmp.cpp
   src/gpufab/router/flowlet.cpp
+  src/gpufab/router/rl.cpp
   src/gpufab/telemetry.cpp
   src/gpufab/topology.cpp
   src/gpufab/workloads.cpp
@@ -31,7 +32,7 @@ add_executable(gpufab_sim src/main.cpp)
 target_link_libraries(gpufab_sim PRIVATE gpufab_core)
 
 enable_testing()
-foreach(t test_config test_rng test_topology test_engine_fct test_congestion test_workloads test_incast_collapse test_flowlet)
+foreach(t test_config test_rng test_topology test_engine_fct test_congestion test_workloads test_incast_collapse test_flowlet test_rl)
   add_executable(${t} tests/${t}.cpp)
   target_link_libraries(${t} PRIVATE gpufab_core)
   add_test(NAME ${t} COMMAND ${t})

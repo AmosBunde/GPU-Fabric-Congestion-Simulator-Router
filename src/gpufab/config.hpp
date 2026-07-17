@@ -18,6 +18,7 @@ class Config {
   const std::string& get_str(const std::string& key) const;
   std::int64_t get_i64(const std::string& key) const;
   std::int64_t get_i64_or(const std::string& key, std::int64_t fallback) const;
+  double get_f64_or(const std::string& key, double fallback) const;
   bool has(const std::string& key) const { return kv_.count(key) > 0; }
 
   const std::map<std::string, std::string>& items() const { return kv_; }
