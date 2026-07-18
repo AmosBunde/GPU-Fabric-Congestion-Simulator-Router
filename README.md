@@ -149,6 +149,17 @@ ctest --test-dir build-san --output-on-failure
 └── results/                    # run outputs (gitignored; configs are tracked instead)
 ```
 
+## System map
+
+A live, interactive scan of this codebase — entry points, the deterministic core,
+the routing control plane (with the RL bandit as the lone agent), the evaluation
+pipeline, and the stores they read and write:
+
+[![Interactive codebase scan on foglamp.dev](docs/assets/foglamp_scan.png)](https://foglamp.dev/scan/gpufab-yvfvqj)
+
+*Click the image for the interactive version (pan, trace flows, jump to source).
+Also embedded live on the [project site](https://amosbunde.github.io/GPU-Fabric-Congestion-Simulator-Router/#map).*
+
 ## Architecture overview
 
 ```mermaid

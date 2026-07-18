@@ -149,6 +149,14 @@
   .feature p { font-size: 14.5px; color: var(--text-2); }
   .feature p code { font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
 
+  /* system map */
+  .scan-frame {
+    margin-top: 40px; border: 1px solid var(--border); border-radius: var(--radius);
+    overflow: hidden; box-shadow: var(--shadow-md); background: #17181c;
+  }
+  .scan-frame iframe { display: block; width: 100%; height: 620px; border: 0; }
+  @media (max-width: 700px) { .scan-frame iframe { height: 460px; } }
+
   /* results */
   .results-layout { margin-top: 48px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
   @media (max-width: 960px) { .results-layout { grid-template-columns: 1fr; } }
@@ -347,6 +355,22 @@
           clock. ECMP (control), a CONGA-style flowlet balancer, and a reinforcement-learning
           policy swap behind it with zero engine changes.</p>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="map">
+    <div class="wrap">
+      <p class="sec-eyebrow">System map</p>
+      <h2>The whole codebase, one traceable graph</h2>
+      <p class="sec-lede">
+        A live scan of the repository: entry points, the deterministic core, the routing
+        control plane, the evaluation pipeline, and the stores between them. Pan the map,
+        trace a flow, click a node to jump to its source file.
+        <a href="https://foglamp.dev/scan/gpufab-yvfvqj">Open full screen&nbsp;&rarr;</a>
+      </p>
+      <div class="scan-frame">
+        <iframe src="https://foglamp.dev/scan/gpufab-yvfvqj" title="Interactive codebase scan (foglamp.dev)" loading="lazy"></iframe>
       </div>
     </div>
   </section>
