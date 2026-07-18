@@ -3,309 +3,530 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>gpufab: measuring congestion-aware routing in GPU fabrics</title>
-<meta name="description" content="A deterministic fabric simulator. Flowlet routing halves p99 flow-completion time against ECMP. The RL router loses, and the reason is worth reading.">
+<title>gpufab — GPU Fabric Congestion Simulator &amp; Router</title>
+<meta name="description" content="A deterministic discrete-event simulator for GPU training fabrics. Congestion-aware flowlet routing halves p99 flow-completion time against ECMP, validated against published results.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+  :root {
+    --bg: #F8FAFC;
+    --surface: #FFFFFF;
+    --text: #0F172A;
+    --text-2: #334155;
+    --text-3: #64748B;
+    --border: #E2E8F0;
+    --primary: #1E40AF;
+    --primary-hover: #1E3A8A;
+    --primary-tint: #EFF4FF;
+    --success: #059669;
+    --danger: #B91C1C;
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+    --shadow-md: 0 1px 3px rgba(15, 23, 42, 0.08), 0 4px 12px rgba(15, 23, 42, 0.06);
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
   body {
-    font-family: Georgia, 'Times New Roman', serif;
-    color: #111;
-    background: #fff;
-    max-width: 44em;
-    margin: 2.5em auto;
-    padding: 0 1em;
-    line-height: 1.55;
-    font-size: 17px;
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 16px;
+    line-height: 1.6;
   }
-  h1 { font-size: 1.55em; line-height: 1.25; margin-bottom: 0.2em; font-weight: bold; }
-  h2 { font-size: 1.2em; margin-top: 2.2em; }
-  h3 { font-size: 1em; margin-top: 1.8em; }
-  a { color: #0645ad; }
-  a:visited { color: #551a8b; }
-  .meta { color: #555; font-size: 0.92em; }
-  hr { border: none; border-top: 1px solid #999; margin: 1.6em 0; }
-  .abstract {
-    margin: 1.4em 2em;
-    font-size: 0.95em;
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ============ nav ============ */
+  .topnav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
   }
-  .abstract b { font-variant: small-caps; font-weight: normal; letter-spacing: 0.04em; }
-  ol.toc { columns: 2; font-size: 0.95em; margin: 0.8em 0 0 0; }
-  ol.toc li { margin-bottom: 0.15em; }
-  @media (max-width: 540px) { ol.toc { columns: 1; } }
-  figure { margin: 1.8em 0; }
-  figure img { width: 100%; height: auto; border: 1px solid #ccc; }
-  figcaption { font-size: 0.88em; color: #333; margin-top: 0.5em; }
-  figcaption b { font-weight: bold; }
-  pre, code, kbd {
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 0.85em;
+  .topnav .wrap { display: flex; align-items: center; gap: 32px; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; color: var(--text); }
+  .brand:hover { text-decoration: none; }
+  .brand-mark {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: var(--primary); color: #fff;
+    display: grid; place-items: center; flex-shrink: 0;
   }
-  pre {
-    background: #f4f4f4;
-    border: 1px solid #ddd;
-    padding: 0.8em 1em;
-    overflow-x: auto;
-    line-height: 1.5;
+  .brand-mark svg { width: 16px; height: 16px; }
+  .nav-links { display: flex; gap: 28px; font-size: 14.5px; font-weight: 500; }
+  .nav-links a { color: var(--text-2); }
+  .nav-links a:hover { color: var(--text); text-decoration: none; }
+  .nav-cta { margin-left: auto; display: flex; gap: 12px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 18px; border-radius: 8px;
+    font-size: 14.5px; font-weight: 600; cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 200ms ease, border-color 200ms ease, color 200ms ease;
   }
-  code { background: #f4f4f4; padding: 0 0.2em; }
-  pre code { background: none; padding: 0; }
-  table { border-collapse: collapse; margin: 1.2em 0; font-size: 0.92em; }
-  th, td { border: 1px solid #999; padding: 0.35em 0.7em; text-align: left; }
-  th { background: #f0f0f0; font-weight: bold; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .fn { font-size: 0.88em; color: #333; }
-  .fn p { margin: 0.5em 0; }
-  sup a { text-decoration: none; }
-  .changelog { font-size: 0.9em; }
-  .changelog td { border: none; padding: 0.15em 1em 0.15em 0; vertical-align: top; white-space: nowrap; }
-  .changelog td + td { white-space: normal; }
-  blockquote {
-    margin: 1.2em 1.5em;
-    padding-left: 1em;
-    border-left: 3px solid #ccc;
-    color: #333;
-    font-size: 0.95em;
+  .btn:hover { text-decoration: none; }
+  .btn svg { width: 16px; height: 16px; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-hover); }
+  .btn-secondary { background: var(--surface); color: var(--text); border-color: var(--border); }
+  .btn-secondary:hover { border-color: #CBD5E1; }
+  @media (max-width: 860px) { .nav-links { display: none; } }
+  @media (max-width: 560px) { .nav-cta .btn-secondary { display: none; } }
+  .table-scroll { overflow-x: auto; margin-top: 24px; }
+  .table-scroll table.results { margin-top: 0; min-width: 640px; }
+
+  /* ============ hero ============ */
+  .hero { padding: 88px 0 64px; background: linear-gradient(180deg, #FFFFFF 0%, var(--bg) 100%); border-bottom: 1px solid var(--border); }
+  .hero .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
+  @media (max-width: 960px) { .hero .wrap { grid-template-columns: 1fr; } }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 600; color: var(--primary);
+    background: var(--primary-tint); border: 1px solid #DBEAFE;
+    padding: 5px 12px; border-radius: 999px; margin-bottom: 20px;
   }
+  .eyebrow svg { width: 14px; height: 14px; }
+  h1 {
+    font-size: clamp(30px, 4vw, 42px); line-height: 1.15;
+    font-weight: 700; letter-spacing: -0.02em; text-wrap: balance;
+  }
+  .hero-sub { margin-top: 18px; font-size: 17px; color: var(--text-2); max-width: 54ch; }
+  .hero-actions { margin-top: 28px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .hero-note { margin-top: 16px; font-size: 13.5px; color: var(--text-3); }
+  .hero-note code { font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; background: #F1F5F9; border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; }
+
+  .hero-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow-md); overflow: hidden;
+  }
+  .hero-card-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; border-bottom: 1px solid var(--border); background: #FBFCFE;
+  }
+  .hero-card-bar span { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+  .hero-card-bar b { margin-left: 6px; font-size: 12.5px; font-weight: 500; color: var(--text-3); font-family: 'IBM Plex Mono', monospace; }
+  .hero-card img { display: block; width: 100%; height: auto; }
+  .hero-card figcaption { padding: 12px 16px; font-size: 13px; color: var(--text-3); border-top: 1px solid var(--border); }
+
+  /* ============ kpi band ============ */
+  .kpis { padding: 40px 0; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+  @media (max-width: 960px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 520px) { .kpi-grid { grid-template-columns: 1fr; } }
+  .kpi { padding: 8px 20px; border-left: 1px solid var(--border); }
+  .kpi:first-child { border-left: none; }
+  @media (max-width: 960px) { .kpi { border-left: none; padding: 8px 0; } }
+  .kpi-value { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; }
+  .kpi-value small { font-size: 16px; font-weight: 500; color: var(--text-3); }
+  .kpi-label { margin-top: 4px; font-size: 13.5px; color: var(--text-3); }
+
+  /* ============ sections ============ */
+  section { padding: 88px 0; }
+  section + section { border-top: 1px solid var(--border); }
+  .sec-eyebrow { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--primary); margin-bottom: 12px; }
+  h2 { font-size: clamp(24px, 3vw, 30px); font-weight: 700; letter-spacing: -0.015em; text-wrap: balance; }
+  .sec-lede { margin-top: 14px; font-size: 16.5px; color: var(--text-2); max-width: 66ch; }
+
+  /* platform */
+  .feature-grid { margin-top: 48px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  @media (max-width: 960px) { .feature-grid { grid-template-columns: 1fr; } }
+  .feature {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 28px; box-shadow: var(--shadow-sm);
+  }
+  .feature-icon {
+    width: 40px; height: 40px; border-radius: 9px;
+    background: var(--primary-tint); color: var(--primary);
+    display: grid; place-items: center; margin-bottom: 18px;
+  }
+  .feature-icon svg { width: 20px; height: 20px; }
+  .feature h3 { font-size: 16.5px; font-weight: 600; margin-bottom: 8px; }
+  .feature p { font-size: 14.5px; color: var(--text-2); }
+  .feature p code { font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+
+  /* results */
+  .results-layout { margin-top: 48px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 960px) { .results-layout { grid-template-columns: 1fr; } }
+  .figure-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm);
+  }
+  .figure-card img { display: block; width: 100%; height: auto; }
+  .figure-card figcaption { padding: 14px 18px; font-size: 13.5px; color: var(--text-2); border-top: 1px solid var(--border); }
+  .figure-card figcaption b { color: var(--text); }
+  .figure-wide { grid-column: 1 / -1; }
+
+  table.results {
+    width: 100%; margin-top: 24px; border-collapse: separate; border-spacing: 0;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm);
+    font-size: 14.5px;
+  }
+  table.results th, table.results td { padding: 12px 18px; text-align: left; }
+  table.results th { background: #F8FAFC; font-weight: 600; font-size: 13.5px; color: var(--text-3); border-bottom: 1px solid var(--border); }
+  table.results td { border-bottom: 1px solid var(--border); }
+  table.results tr:last-child td { border-bottom: none; }
+  table.results td.num, table.results th.num { text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; }
+  .tag { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .tag-best { background: #ECFDF5; color: var(--success); border: 1px solid #A7F3D0; }
+  .tag-control { background: #F1F5F9; color: var(--text-3); border: 1px solid var(--border); }
+  .tag-negative { background: #FEF2F2; color: var(--danger); border: 1px solid #FECACA; }
+
+  .callout {
+    margin-top: 24px; display: flex; gap: 14px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px 22px; box-shadow: var(--shadow-sm);
+  }
+  .callout svg { width: 20px; height: 20px; flex-shrink: 0; color: var(--primary); margin-top: 2px; }
+  .callout p { font-size: 14.5px; color: var(--text-2); }
+  .callout p b { color: var(--text); }
+
+  /* assurance */
+  .assure-grid { margin-top: 48px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px 32px; }
+  @media (max-width: 800px) { .assure-grid { grid-template-columns: 1fr; } }
+  .assure { display: flex; gap: 14px; padding: 18px 0; border-bottom: 1px solid var(--border); }
+  .assure svg { width: 22px; height: 22px; flex-shrink: 0; color: var(--success); margin-top: 2px; }
+  .assure h3 { font-size: 15.5px; font-weight: 600; }
+  .assure p { margin-top: 4px; font-size: 14px; color: var(--text-2); }
+
+  /* reproduce band */
+  .repro { background: #0F1E4D; color: #E2E8F0; }
+  .repro .sec-eyebrow { color: #93C5FD; }
+  .repro h2 { color: #fff; }
+  .repro .sec-lede { color: #C7D2E5; }
+  .repro-terminal {
+    margin-top: 36px; background: #0B1638; border: 1px solid #27407F;
+    border-radius: var(--radius); overflow: hidden;
+  }
+  .repro-terminal pre {
+    padding: 22px 26px; overflow-x: auto;
+    font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; line-height: 1.9;
+    color: #C7D2E5;
+  }
+  .repro-terminal .c { color: #7C93C4; }
+  .repro-terminal .g { color: #6EE7B7; }
+
+  /* resources */
+  .doc-grid { margin-top: 48px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+  @media (max-width: 960px) { .doc-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 520px) { .doc-grid { grid-template-columns: 1fr; } }
+  a.doc {
+    display: block; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow-sm);
+    color: var(--text); transition: border-color 200ms ease, box-shadow 200ms ease;
+  }
+  a.doc:hover { text-decoration: none; border-color: #BFD0F0; box-shadow: var(--shadow-md); }
+  a.doc svg { width: 20px; height: 20px; color: var(--primary); margin-bottom: 14px; }
+  a.doc h3 { font-size: 15px; font-weight: 600; }
+  a.doc p { margin-top: 6px; font-size: 13.5px; color: var(--text-3); }
+  a.doc .go { margin-top: 12px; font-size: 13px; font-weight: 600; color: var(--primary); }
+
+  /* footer */
+  footer { border-top: 1px solid var(--border); background: var(--surface); padding: 40px 0; }
+  .foot { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 13.5px; color: var(--text-3); }
+  .foot a { color: var(--text-2); }
 </style>
 </head>
 <body>
 
-<h1>Measuring congestion-aware routing in GPU fabrics</h1>
-<p class="meta">
-  A deterministic discrete-event simulator and three routers that plug into it.<br>
-  <a href="https://github.com/AmosBunde/GPU-Fabric-Congestion-Simulator-Router">Source on GitHub</a> ·
-  <a href="architecture.html">architecture diagram</a> ·
-  last updated 2026-07-18
-</p>
+<nav class="topnav" aria-label="Main">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="gpufab home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6.6 7.2 10.2 10.6M17.4 7.2 13.8 10.6M6.6 16.8 10.2 13.4M17.4 16.8 13.8 13.4"/></svg>
+      </span>
+      gpufab
+    </a>
+    <div class="nav-links">
+      <a href="#platform">Platform</a>
+      <a href="#results">Results</a>
+      <a href="#assurance">Verification</a>
+      <a href="#docs">Documentation</a>
+    </div>
+    <div class="nav-cta">
+      <a class="btn btn-secondary" href="architecture.html">Architecture</a>
+      <a class="btn btn-primary" href="https://github.com/AmosBunde/GPU-Fabric-Congestion-Simulator-Router">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.09.68-.22.68-.49 0-.24-.01-.87-.01-1.7-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.5-1.11-1.5-.91-.63.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.7 0 0 .84-.28 2.75 1.05a9.3 9.3 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.4.2 2.44.1 2.7.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.8-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.81 0 .27.18.59.69.49A10.05 10.05 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
 
-<hr>
+<header class="hero" id="top">
+  <div class="wrap">
+    <div>
+      <span class="eyebrow">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+        Validated against published results
+      </span>
+      <h1>Quantify what adaptive routing recovers from your GPU fabric&rsquo;s tail</h1>
+      <p class="hero-sub">
+        gpufab is a deterministic discrete-event simulator for GPU training fabrics.
+        It models congestion where it actually forms&nbsp;&mdash; queues, drops, ECN, retransmission&nbsp;&mdash;
+        and measures routing strategies against each other with paired seeds and
+        confidence intervals. Same seed, same config, byte-identical results.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#results">View measured results</a>
+        <a class="btn btn-secondary" href="#reproduce">Reproduce them</a>
+      </div>
+      <p class="hero-note">C++20 core, zero third-party dependencies &middot; Python analysis over Parquet &middot; <code>ctest</code> green under ASan/UBSan on every push</p>
+    </div>
+    <figure class="hero-card">
+      <div class="hero-card-bar" aria-hidden="true"><span></span><span></span><span></span><b>harness.py --routers ecmp,flowlet,rl --seeds 20</b></div>
+      <img src="assets/fct_comparison.png" width="1125" height="750"
+           alt="CDF of flow completion time for ECMP, flowlet, and RL routers across 20 paired seeds with error bands. The flowlet curve reaches high percentiles at roughly half the ECMP tail latency.">
+      <figcaption>Flow-completion-time distributions, 20 paired seeds, 10&ndash;90% bands. The separation is in the tail.</figcaption>
+    </figure>
+  </div>
+</header>
 
-<div class="abstract">
-<p><b>Abstract.</b> Collective traffic on GPU training fabrics produces transient
-congestion (incast bursts, ECMP hash collisions) that static routing cannot react to,
-and which shows up almost entirely in the tail of the flow-completion-time (FCT)
-distribution. This project builds a small, deterministic fabric simulator (C++20,
-integer-picosecond virtual clock, packet-train granularity), validates it against the
-published incast throughput-collapse result before trusting it, and then compares three
-routers behind one interface. A CONGA-style flowlet router halves p99 FCT against ECMP
-on permutation traffic over an oversubscribed Clos. A reinforcement-learning router,
-given the same telemetry, loses to both baselines; the diagnosis (§5) is more useful
-than a win would have been. Same seed, same config, same bytes, every time.</p>
+<div class="kpis" role="region" aria-label="Key results">
+  <div class="wrap kpi-grid">
+    <div class="kpi">
+      <div class="kpi-value num">&frac12;&times; <small>p99 FCT</small></div>
+      <div class="kpi-label">Flowlet routing vs ECMP: 15.9&nbsp;&rarr;&nbsp;7.9&nbsp;ms across 20 paired seeds</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-value num">0.98&rarr;0.08</div>
+      <div class="kpi-label">Incast goodput collapse reproduced (Vasudevan et&nbsp;al., SIGCOMM&nbsp;2009)</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-value num">5.5&thinsp;s <small>/ 2.1M flows</small></div>
+      <div class="kpi-label">1,024-host ring all-reduce, 17M events, single core</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-value num">100%</div>
+      <div class="kpi-label">Byte-identical reruns from the same seed and config, enforced in CI</div>
+    </div>
+  </div>
 </div>
 
-<h2>Contents</h2>
-<ol class="toc">
-  <li><a href="#why">Why bother</a></li>
-  <li><a href="#what">What was built</a></li>
-  <li><a href="#validation">Earning the right to compare</a></li>
-  <li><a href="#results">Results</a></li>
-  <li><a href="#negative">The router that lost</a></li>
-  <li><a href="#repro">Reproducing everything</a></li>
-  <li><a href="#limits">Limitations</a></li>
-  <li><a href="#colophon">Colophon &amp; changelog</a></li>
-</ol>
+<main>
+  <section id="platform">
+    <div class="wrap">
+      <p class="sec-eyebrow">Platform</p>
+      <h2>Congestion modeled where it forms, routing swapped where it counts</h2>
+      <p class="sec-lede">
+        A single-threaded deterministic core advances packet-train events on an
+        integer-picosecond virtual clock. Telemetry flows from the data plane to a
+        pluggable routing interface; the closed feedback loop from queue depth to path
+        decision is the object of study.
+      </p>
+      <div class="feature-grid">
+        <div class="feature">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <h3>Deterministic core</h3>
+          <p>Virtual clock in integer picoseconds keeps serialization delays exact and
+          event order free of floating-point drift. No wall-clock, no sockets, no threads
+          in the model path. One master seed; every stream named and logged.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>
+          </div>
+          <h3>Real data plane</h3>
+          <p>Per-link FIFO queues with buffer limits, tail-drop, and ECN marking; a
+          TCP-shaped transport with SACK-style fast retransmit and RTO backoff; incast,
+          ring all-reduce, and permutation workloads. Congestion emerges, it is not scripted.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg>
+          </div>
+          <h3>Pluggable routing</h3>
+          <p>One <code>IRouter</code> interface: telemetry in, path out, never the wall
+          clock. ECMP (control), a CONGA-style flowlet balancer, and a reinforcement-learning
+          policy swap behind it with zero engine changes.</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
-<h2 id="why">1. Why bother</h2>
+  <section id="results">
+    <div class="wrap">
+      <p class="sec-eyebrow">Measured results</p>
+      <h2>One control, one heuristic, one experiment&nbsp;&mdash; reported with equal weight</h2>
+      <p class="sec-lede">
+        64-host two-tier Clos at 4:1 oversubscription, 2&nbsp;MiB uniform-permutation flows,
+        20 seeds. The same 20 traffic patterns are replayed for every router, so
+        comparisons are paired; percentiles carry bootstrap confidence intervals.
+      </p>
 
-<p>When a thousand GPUs run all-reduce, the network is quiet, then everyone talks at
-once, then it is quiet again. Averages hide this completely. The damage is done by the
-worst few flows per iteration — the p99 and p99.9 stragglers that every other GPU waits
-for. So the question worth asking is narrow: <i>how much of the tail can routing
-actually recover?</i> Not "can we build a smarter router" in the abstract, but a measured
-delta against the boring control, on stated traffic, with error bars.</p>
+      <div class="table-scroll">
+      <table class="results">
+        <caption class="sr-only" style="position:absolute;left:-9999px">Flow completion time percentiles by router</caption>
+        <thead>
+          <tr><th>Router</th><th>Role</th><th class="num">p50 (&micro;s)</th><th class="num">p99 (&micro;s)</th><th class="num">p99 95% CI</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>Flowlet</b> &mdash; stickiness + hysteresis</td><td><span class="tag tag-best">Best tail</span></td><td class="num">812</td><td class="num"><b>7,872</b></td><td class="num">4,057 &ndash; 15,817</td></tr>
+          <tr><td><b>ECMP</b> &mdash; static hashing</td><td><span class="tag tag-control">Control</span></td><td class="num">812</td><td class="num">15,928</td><td class="num">8,019 &ndash; 16,085</td></tr>
+          <tr><td><b>RL</b> &mdash; online tabular bandit</td><td><span class="tag tag-negative">Negative result</span></td><td class="num">1,904</td><td class="num">16,097</td><td class="num">&mdash;</td></tr>
+        </tbody>
+      </table>
+      </div>
 
-<p>Simulation is the honest way to ask it, provided the simulator itself is trustworthy.
-Most aren't, in a specific way: they are validated against nothing, and then their
-router comparisons inherit the vacuum. The rule here was simple: no router work of any
-kind until the simulator reproduced a known published result (§3).</p>
+      <div class="callout">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <p><b>The negative result is reported, not buried.</b> The RL router receives the
+        same telemetry as the heuristic and still loses to both baselines. Reducing
+        exploration makes its tail worse: concurrent senders greedily sharing one learned
+        policy herd onto the same spine. The heuristic&rsquo;s stickiness and hashed
+        tie-breaking supply exactly the decorrelation the policy lacks &mdash; a
+        structural diagnosis, deterministic and reproducible.
+        <a href="https://github.com/AmosBunde/GPU-Fabric-Congestion-Simulator-Router/blob/main/docs/RESULTS.md">Full analysis&nbsp;&rarr;</a></p>
+      </div>
 
-<h2 id="what">2. What was built</h2>
+      <div class="results-layout">
+        <figure class="figure-card">
+          <img src="assets/incast_collapse.png" width="1050" height="675"
+               alt="Goodput versus number of synchronized senders: near line rate up to 8 senders, collapsing below 10 percent of line rate at 63 senders." loading="lazy">
+          <figcaption><b>Validation gate.</b> Goodput 0.98 of line rate at 8 senders,
+          0.08 at 63 &mdash; the published incast collapse curve, regenerated by CI on
+          every push. No router work preceded this gate.</figcaption>
+        </figure>
+        <figure class="figure-card">
+          <img src="assets/link_heatmap.png" width="1500" height="675"
+               alt="Heatmap of per-link utilization over time under flowlet routing, with isolated straggler bursts late in the run." loading="lazy">
+          <figcaption><b>Fabric telemetry.</b> Link utilization over virtual time under
+          flowlet routing. Isolated late bursts are stragglers exiting RTO backoff
+          &mdash; the documented p99.9 caveat, visible in the data.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
 
-<p>A single-threaded discrete-event engine. The virtual clock is an <code>int64</code>
-counting picoseconds, which makes serialization delays exact for whole-Gbps link rates
-and removes floating-point drift from event ordering entirely.<sup><a href="#fn1" id="r1">1</a></sup>
-Events are scheduled per <i>chunk</i> (64&nbsp;KiB packet train), not per packet — fine
-enough that queues, drops, and ECN marks emerge; coarse enough that a 1024-host
-all-reduce (2.1&nbsp;million flows, 17&nbsp;million events) finishes in 5.5 seconds on
-one core.</p>
+  <section id="assurance">
+    <div class="wrap">
+      <p class="sec-eyebrow">Verification &amp; reproducibility</p>
+      <h2>Engineering assurance, in place of marketing claims</h2>
+      <p class="sec-lede">Every claim on this page traces to a seeded run directory
+      stamped with its config hash and git SHA. These are the standing guarantees.</p>
+      <div class="assure-grid">
+        <div class="assure">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+          <div><h3>Validated before compared</h3>
+          <p>The simulator reproduced the SIGCOMM 2009 incast throughput-collapse curve
+          before any router comparison ran. The gate is enforced by CI with a nonzero
+          exit if the collapse disappears.</p></div>
+        </div>
+        <div class="assure">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          <div><h3>Deterministic by construction</h3>
+          <p>Integer-picosecond clock, seeded named RNG streams, insertion-order event
+          tie-breaking. Two runs with the same inputs produce byte-identical output; a
+          test asserts it.</p></div>
+        </div>
+        <div class="assure">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 2 1.88 1.88M14.12 3.88 16 2M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9M6.53 9C4.6 8.8 3 7.1 3 5M6 13H2M3 21c0-2.1 1.7-3.9 3.8-4M20.97 5c0 2.1-1.6 3.8-3.5 4M22 13h-4M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>
+          <div><h3>Sanitized on every push</h3>
+          <p>AddressSanitizer and UndefinedBehaviorSanitizer builds with warnings-as-errors
+          run the full test suite in CI, alongside an end-to-end artifact check and the
+          validation gate.</p></div>
+        </div>
+        <div class="assure">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
+          <div><h3>Anchored to closed forms</h3>
+          <p>A single uncontended flow&rsquo;s completion time must equal the analytic
+          store-and-forward value exactly, to the picosecond. The anchor keeps the model
+          honest as features accrete.</p></div>
+        </div>
+        <div class="assure">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
+          <div><h3>Statistics, not anecdotes</h3>
+          <p>Twenty paired seeds per comparison, pooled percentiles with bootstrap 95%
+          confidence intervals, identical traffic replayed per router. Medians and tails
+          reported side by side.</p></div>
+        </div>
+        <div class="assure">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <div><h3>Limitations stated up front</h3>
+          <p>Packet-train granularity, no PFC, single failure domain, static topology;
+          p99.9 can regress on a minority of seeds under any rerouting scheme. Scale
+          claims stop at 1,024 simulated hosts, because that is what was measured.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
 
-<p>On top of that: two-tier Clos topologies; per-link FIFO queues with buffer limits,
-tail-drop, and ECN threshold marking; a deliberately TCP-shaped transport (windowed,
-SACK-style fast retransmit, RTO with exponential backoff); and workloads for incast,
-ring all-reduce, and random permutation. Everything that consumes randomness draws from
-a named stream derived from one master seed, and every stream is logged per run. Two
-runs with the same seed and config produce byte-identical output, and a CI job holds
-the project to that.</p>
-
-<p>Routing is one interface. A router sees fabric telemetry (live queue depths,
-drop and mark counters, a utilization average) and returns a path. It never sees the
-wall clock. Three implementations sit behind it:</p>
-
-<table>
-<tr><th>Router</th><th>One-line description</th><th>Role</th></tr>
-<tr><td>ECMP</td><td>Hash the flow id, pick a spine, never look back</td><td>control</td></tr>
-<tr><td>Flowlet</td><td>Least-congested spine, with stickiness and hysteresis</td><td>the heuristic to beat</td></tr>
-<tr><td>RL</td><td>Tabular bandit; reward is negative queueing delay</td><td>the experiment</td></tr>
-</table>
-
-<h2 id="validation">3. Earning the right to compare</h2>
-
-<p>The gate: drive a synchronized many-to-one incast pattern at a shallow-buffered
-bottleneck and check that the simulator produces the throughput collapse reported by
-Vasudevan et&nbsp;al. at SIGCOMM 2009. It does: goodput climbs to 0.98 of line rate at
-8 senders, falls off a cliff past 10, and grinds down to 0.08 at 63:</p>
-
-<figure>
-  <img src="assets/incast_collapse.png" width="1050" height="675"
-       alt="Goodput against number of synchronized senders. Near line rate up to 8 senders, then a collapse to below 10% of line rate at 63 senders.">
-  <figcaption><b>Figure 1.</b> Incast throughput collapse, reproduced. 64-host Clos,
-  256&nbsp;KiB buffers, 256&nbsp;KiB per sender, RTO 500&nbsp;µs. This exact curve is
-  re-generated by CI on every push; if the collapse disappears, the build fails.</figcaption>
-</figure>
-
-<p>Getting the curve's <i>shape</i> right forced two pieces of transport realism:
-without fast retransmit, a single tail-drop costs a full RTO and the curve collapses at
-every sender count; without a window cap, additive increase overflows the buffer at
-every sender count. Both are the kind of bug a pretty but unvalidated simulator would
-have carried silently into every router comparison downstream.</p>
-
-<h2 id="results">4. Results</h2>
-
-<p>Setup: 64-host two-tier Clos, four spines, 4:1 oversubscription at the leaf; every
-host sends 2&nbsp;MiB to a random partner (a seeded derangement); 20 seeds, and the
-<i>same</i> 20 traffic patterns are replayed for every router, so comparisons are
-paired. Percentiles are pooled with bootstrap confidence intervals over seeds.</p>
-
-<figure>
-  <img src="assets/fct_comparison.png" width="1125" height="750"
-       alt="CDF of flow completion time for ECMP, flowlet, and RL routers, with error bands across 20 seeds.">
-  <figcaption><b>Figure 2.</b> FCT distributions, 20 paired seeds, bands are the
-  10th–90th percentile across seeds. Medians are indistinguishable; the separation is
-  all in the upper tail.</figcaption>
-</figure>
-
-<table>
-<tr><th>Router</th><th class="num">p50 (µs)</th><th class="num">p99 (µs)</th><th class="num">p99 CI95</th></tr>
-<tr><td>ECMP</td><td class="num">812</td><td class="num">15,928</td><td class="num">[8,019&nbsp;–&nbsp;16,085]</td></tr>
-<tr><td>Flowlet</td><td class="num">812</td><td class="num"><b>7,872</b></td><td class="num">[4,057&nbsp;–&nbsp;15,817]</td></tr>
-<tr><td>RL</td><td class="num">1,904</td><td class="num">16,097</td><td class="num">—</td></tr>
-</table>
-
-<p>The headline is the middle row: <b>the flowlet router halves pooled p99 FCT</b> and
-leaves the median alone, which is exactly the signature you want from adaptive routing;
-it should only matter when hashing gets unlucky.</p>
-
-<p>It did not start out that way. The first version of the adaptive router simply sent
-every flowlet to the least-queued spine, and it measured <i>eight times worse</i> than
-ECMP.<sup><a href="#fn2" id="r2">2</a></sup> Queue telemetry lags a send decision by the
-host-to-leaf latency, so every sender saw the same "empty" spine, dogpiled onto it,
-then dogpiled off it in unison. The fix was not better information but coordination:
-a flow keeps its current path unless an alternative beats it by more than the flow's
-own backlog, and ties break by a salted hash so simultaneous deciders spread out.
-Herding, hysteresis, decorrelation — remember those three words for §5.</p>
-
-<figure>
-  <img src="assets/link_heatmap.png" width="1500" height="675"
-       alt="Heatmap of per-link utilization over time under flowlet routing.">
-  <figcaption><b>Figure 3.</b> Fabric-link utilization over virtual time, one flowlet
-  run. The lonely bursts around 3,500&nbsp;µs are straggler flows climbing out of RTO
-  backoff — the p99.9 caveat of §7, visible to the naked eye.</figcaption>
-</figure>
-
-<h2 id="negative">5. The router that lost</h2>
-
-<p>The RL router is a tabular contextual bandit. Its state is the pair of leaves plus
-each candidate spine's congestion bucket, built from the same telemetry snapshot the
-flowlet router reads — information parity was a design requirement, so that any gap is
-attributable to the policy rather than the inputs. Reward is negative queueing delay,
-fed back per delivered chunk. Action selection is ε-greedy from a seeded, logged
-stream. All of it deterministic and unit-tested: on a stationary bottleneck it reliably
-learns to route around the congested spine.</p>
-
-<p>On the real workload it loses to both baselines. Exploration is not the reason; that
-only explains the doubled median. The damning observation is what happened when
-exploration was <i>reduced</i>: p99 got worse, not better, doubling to 31.8&nbsp;ms.
-A greedier shared policy means more agents taking the same argmax at the same moment on
-the same stale state. The learned router herds <i>structurally</i>, the exact pathology
-of §4 — but where the heuristic carries stickiness and hashed tie-breaking as built-in
-decorrelation, the bandit has nothing pulling concurrent decisions apart.</p>
-
-<p>So the honest conclusion is not "RL doesn't work." It is narrower and more useful:
-a per-decision learned policy, shared by many simultaneous actors on lagging state,
-needs a coordination mechanism before it can even match a well-tuned heuristic. And
-within a single 16-millisecond episode there are only about two thousand decisions
-spread over thousands of table states, so it is data-starved on top of it. Cross-episode
-training and per-flow decorrelation are the obvious next experiments, and the harness
-is already built for them.</p>
-
-<h2 id="repro">6. Reproducing everything</h2>
-
-<p>Each figure on this page regenerates from one command. Runs land in a directory
-stamped with the config hash and git SHA; the manifest records whether the tree was
-dirty, and a dirty run is by definition not publishable.</p>
-
-<pre><code># build (C++20, no third-party dependencies in the core)
+  <section class="repro" id="reproduce">
+    <div class="wrap">
+      <p class="sec-eyebrow">Reproduce</p>
+      <h2>Every figure, one command each</h2>
+      <p class="sec-lede">Runs land in directories stamped with config hash and git SHA.
+      A dirty working tree is recorded in the manifest and disqualifies the artifact.</p>
+      <div class="repro-terminal">
+        <pre><span class="c"># build the core (C++20, no third-party dependencies)</span>
 cmake -B build -DCMAKE_BUILD_TYPE=Release &amp;&amp; cmake --build build -j
 python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.txt
 
-# figure 1 — exits nonzero if the collapse fails to reproduce
+<span class="c"># validation gate — exits nonzero unless the collapse reproduces</span>
 .venv/bin/python python/validate_incast.py
+<span class="g">peak=0.981 tail=0.082 collapse=YES</span>
 
-# figure 2 and the table — 20 paired seeds, three routers
+<span class="c"># three-way comparison, 20 paired seeds, bootstrap CIs</span>
 .venv/bin/python python/harness.py --routers ecmp,flowlet,rl --seeds 20
 
-# figure 3 — from any run directory containing links.parquet
-.venv/bin/python python/plot_heatmap.py results/sweep/runs/&lt;run&gt;</code></pre>
+<span class="c"># link-utilization heatmap from any run directory</span>
+.venv/bin/python python/plot_heatmap.py results/sweep/runs/&lt;run&gt;</pre>
+      </div>
+    </div>
+  </section>
 
-<p>Tests run under AddressSanitizer and UBSan with warnings-as-errors on every push,
-including an analytic anchor: a single uncontended flow's completion time must equal
-the closed-form store-and-forward value, exactly, to the picosecond.</p>
+  <section id="docs">
+    <div class="wrap">
+      <p class="sec-eyebrow">Documentation</p>
+      <h2>Written like it will be audited</h2>
+      <div class="doc-grid">
+        <a class="doc" href="https://github.com/AmosBunde/GPU-Fabric-Congestion-Simulator-Router/blob/main/docs/ARCHITECTURE.md">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+          <h3>Architecture &amp; ADRs</h3>
+          <p>Component catalog, event and time models, seven decision records, quality attributes.</p>
+          <span class="go">Read &rarr;</span>
+        </a>
+        <a class="doc" href="https://github.com/AmosBunde/GPU-Fabric-Congestion-Simulator-Router/blob/main/docs/RESULTS.md">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <h3>Results &amp; analysis</h3>
+          <p>Full three-way comparison, the herding diagnosis, and the honest caveats.</p>
+          <span class="go">Read &rarr;</span>
+        </a>
+        <a class="doc" href="https://github.com/AmosBunde/GPU-Fabric-Congestion-Simulator-Router/blob/main/docs/DEPLOYMENT.md">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          <h3>Operations</h3>
+          <p>Build matrix, CI pipeline, experiment workflow, results-store management, runbook.</p>
+          <span class="go">Read &rarr;</span>
+        </a>
+        <a class="doc" href="https://github.com/AmosBunde/GPU-Fabric-Congestion-Simulator-Router/blob/main/docs/PROJECT_PLAN.md">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <h3>Project plan</h3>
+          <p>Gated phase plan, evaluation methodology, risk register, definition of done.</p>
+          <span class="go">Read &rarr;</span>
+        </a>
+      </div>
+    </div>
+  </section>
+</main>
 
-<h2 id="limits">7. Limitations</h2>
-
-<p>Stated plainly, because they are the boundary of the claim. Chunk granularity, not
-per-packet; no PFC or lossless fabrics; single failure domain; static topology. The
-transport's ECN response is a blunt once-per-RTT halving rather than DCTCP's
-proportional response, which is why the validation gate rests on the tail-drop curve.
-Under any rerouting scheme, p99.9 can regress on a minority of seeds (2 of 20 here)
-when a rerouted burst lands in an already-full queue and climbs the RTO backoff
-ladder. Headline experiments ran at 64 hosts; the engine is exercised to 1,024. Nothing
-here says "hundreds of thousands of GPUs," because nothing here measured that.</p>
-
-<h2 id="colophon">8. Colophon &amp; changelog</h2>
-
-<p>This page is one HTML file with no JavaScript, no analytics, no cookies, and no
-fonts you didn't already have. The figures are unedited matplotlib output from seeded
-runs. The <a href="architecture.html">architecture diagram</a> keeps its own dark
-styling because control-room aesthetics are appropriate for control rooms.</p>
-
-<p>To cite:</p>
-
-<pre><code>@misc{gpufab2026,
-  title  = {GPU Fabric Congestion Simulator \&amp; Router},
-  author = {Bunde, Amos},
-  year   = {2026},
-  url    = {https://github.com/AmosBunde/GPU-Fabric-Congestion-Simulator-Router}
-}</code></pre>
-
-<table class="changelog">
-<tr><td>2026-07-17</td><td>Reproducibility spine and walking skeleton; first end-to-end FCT.</td></tr>
-<tr><td>2026-07-18</td><td>Data plane, transport, incast validation gate passed; flowlet and RL
-routers; 20-seed three-way comparison; this page.</td></tr>
-</table>
-
-<hr>
-
-<div class="fn">
-<p id="fn1"><a href="#r1">1.</a> Why picoseconds and not nanoseconds: 64&nbsp;KiB at
-100&nbsp;Gbps serializes in 5,242.88&nbsp;ns — not an integer. In picoseconds it is
-5,242,880 exactly. Exact arithmetic is what lets the test suite demand byte-identical
-reruns instead of "close enough," and an int64 of picoseconds still covers 106 days of
-simulated time, which is 105.9 more than needed.</p>
-<p id="fn2"><a href="#r2">2.</a> This number was embarrassing enough to re-check three
-times, seeded. It is real, it is deterministic, and it is the most instructive
-measurement in the project: adaptive routing with lagging state and no decorrelation is
-not merely suboptimal, it is worse than not adapting at all.</p>
-</div>
+<footer>
+  <div class="wrap foot">
+    <span>gpufab &mdash; GPU Fabric Congestion Simulator &amp; Router</span>
+    <span>
+      <a href="https://github.com/AmosBunde/GPU-Fabric-Congestion-Simulator-Router">GitHub</a> &nbsp;&middot;&nbsp;
+      <a href="architecture.html">Architecture diagram</a> &nbsp;&middot;&nbsp;
+      <a href="https://github.com/AmosBunde/GPU-Fabric-Congestion-Simulator-Router/tags">Release tags</a>
+    </span>
+    <span>Simulated at 16&ndash;1,024 hosts. Never &ldquo;hundreds of thousands.&rdquo;</span>
+  </div>
+</footer>
 
 </body>
 </html>
